@@ -1,0 +1,458 @@
+{
+  "name": "WF-04 Reply Watcher",
+  "nodes": [
+    {
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "custom",
+              "cronExpression": "*/5 * * * *"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "is:unread -from:me"
+        },
+        "options": {
+          "downloadAttachments": false
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "hr-gmail",
+          "name": "HR Gmail"
+        }
+      },
+      "id": "wf-04-gmail-trigger",
+      "position": [
+        220,
+        180
+      ]
+    },
+    {
+      "name": "Read Config",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Config",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "hr-sheets-sa",
+          "name": "HR Sheets Service Account"
+        }
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "id": "wf-04-read-config",
+      "position": [
+        480,
+        180
+      ]
+    },
+    {
+      "name": "Read Applicants",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Applicants",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "hr-sheets-sa",
+          "name": "HR Sheets Service Account"
+        }
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "id": "wf-04-read-applicants",
+      "position": [
+        740,
+        180
+      ]
+    },
+    {
+      "name": "Classify Replies",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ---------------------------------------------------------------------\n\n// GENERATED FILE — do not edit inside n8n.\n\n// Source: n8n/src/nodes/wf04-replies.js  +  n8n/src/lib/{errors,schema,util,intake,template,ai-router,pipeline,runtime}.js\n\n// Edit the source and run `npm run build:workflows`.\n\n// ---------------------------------------------------------------------\n\n// ===== lib/errors.js =====\n\n/**\n * Typed error catalogue. See docs/error-codes.md (canonical prose copy).\n *\n * Every failure in this system carries one of these codes. `retryable` drives\n * the queue behaviour: transient errors back off and retry, permanent errors go\n * straight to a human. `park` means \"not a failure at all — stop and resume\n * later\", used for exhausted daily quotas.\n */\n\nconst SEVERITY = { WARN: 'warn', ERROR: 'error', FATAL: 'fatal' };\n\nconst ERROR_CATALOGUE = {\n  // --- Intake: bad input from the form or a human typing in the sheet -------\n  'E-INTAKE-MISSING': { retryable: false, severity: SEVERITY.ERROR, hint: 'A required field is empty. Fix the row in the Applicants sheet and set status to blank to reprocess.' },\n  'E-INTAKE-EMAIL':   { retryable: false, severity: SEVERITY.ERROR, hint: 'Email address is not parseable. Correct it in the sheet.' },\n  'E-INTAKE-ROLE':    { retryable: false, severity: SEVERITY.ERROR, hint: 'job_role does not match any row in the JobRoles tab. Add the role or correct the spelling.' },\n  'E-INTAKE-DUPE':    { retryable: false, severity: SEVERITY.WARN,  hint: 'This email already has an application for this role. Delete the duplicate row or change the role.' },\n  'E-INTAKE-CATEGORY':{ retryable: false, severity: SEVERITY.ERROR, hint: 'category is not one of the configured values. See the Config tab, key \"categories\".' },\n\n  // --- Resume retrieval ----------------------------------------------------\n  'E-FETCH-404':  { retryable: false, severity: SEVERITY.ERROR, hint: 'Resume link is dead. Ask the candidate to resubmit.' },\n  'E-FETCH-PERM': { retryable: false, severity: SEVERITY.ERROR, hint: 'Drive file is not shared with the service account. Share the folder with the service account email.' },\n  'E-FETCH-SIZE': { retryable: false, severity: SEVERITY.ERROR, hint: 'Resume exceeds the size limit in Config (max_resume_mb).' },\n  'E-FETCH-TYPE': { retryable: false, severity: SEVERITY.ERROR, hint: 'Unsupported file type. Accepted: pdf, doc, docx, txt, md.' },\n  'E-FETCH-NET':  { retryable: true,  severity: SEVERITY.ERROR, hint: 'Network failure while downloading. Will retry.' },\n\n  // --- Model layer ---------------------------------------------------------\n  'E-LLM-TIMEOUT': { retryable: true,  severity: SEVERITY.ERROR, hint: 'Model did not respond in time. Will retry, then fail over to the backup provider.' },\n  'E-LLM-SCHEMA':  { retryable: false, severity: SEVERITY.ERROR, hint: 'Model returned invalid JSON twice, including a repair attempt. Check the prompt version in prompts/.' },\n  'E-LLM-REFUSAL': { retryable: false, severity: SEVERITY.ERROR, hint: 'Model declined to answer. Usually a prompt problem, not a data problem.' },\n  'E-LLM-EMPTY':   { retryable: true,  severity: SEVERITY.ERROR, hint: 'Model returned an empty response. Will retry.' },\n  'E-LLM-AUTH':    { retryable: false, severity: SEVERITY.FATAL,  hint: 'API key rejected. Check GROQ_API_KEY / GEMINI_API_KEY in the n8n environment.' },\n  'E-LLM-SERVER':  { retryable: true,  severity: SEVERITY.ERROR, hint: 'Provider returned 5xx. Will retry, then fail over.' },\n\n  // --- Rate limits. E-QUOTA-TPD is a park, not a failure. ------------------\n  'E-QUOTA-RPM': { retryable: true,  severity: SEVERITY.WARN,  hint: 'Per-minute limit hit. Backing off.' },\n  'E-QUOTA-TPD': { retryable: true,  severity: SEVERITY.WARN,  park: true, hint: 'Daily token budget exhausted for this model. Work parks and resumes at the window reset.' },\n  'E-QUOTA-ALL': { retryable: true,  severity: SEVERITY.FATAL, park: true, hint: 'Every configured provider is exhausted. Nothing is lost — the queue resumes at the next window reset.' },\n\n  // --- Sending -------------------------------------------------------------\n  'E-MAIL-AUTH':     { retryable: false, severity: SEVERITY.FATAL, hint: 'Gmail OAuth credential expired. Reconnect it in n8n > Credentials.' },\n  'E-MAIL-BOUNCE':   { retryable: false, severity: SEVERITY.ERROR, hint: 'Address rejected by the mail server. Correct it in the sheet.' },\n  'E-MAIL-LIMIT':    { retryable: true,  severity: SEVERITY.WARN,  park: true, hint: 'Daily Gmail send cap reached (~500/day on consumer accounts). Remaining sends resume tomorrow.' },\n  'E-MAIL-TEMPLATE': { retryable: false, severity: SEVERITY.ERROR, hint: 'Template still contains unresolved {{merge_fields}}. Nothing was sent.' },\n  'E-MAIL-NODRAFT':  { retryable: false, severity: SEVERITY.ERROR, hint: 'Send was requested for a row with no approved draft. Generate and approve a draft first.' },\n\n  // --- Google Sheets -------------------------------------------------------\n  'E-SHEET-429':    { retryable: true,  severity: SEVERITY.WARN,  hint: 'Sheets API rate limit. Backing off.' },\n  'E-SHEET-PERM':   { retryable: false, severity: SEVERITY.FATAL, hint: 'Spreadsheet is not shared with the service account (needs Editor).' },\n  'E-SHEET-SCHEMA': { retryable: false, severity: SEVERITY.FATAL, hint: 'Expected column is missing. Run `npm run bootstrap:sheets` to repair the headers.' },\n\n  // --- Setup / config ------------------------------------------------------\n  'E-CONFIG-MISSING': { retryable: false, severity: SEVERITY.FATAL, hint: 'A required environment variable is not set. See .env.example.' },\n  'E-CONFIG-CRED':    { retryable: false, severity: SEVERITY.FATAL, hint: 'A credential is invalid or unreachable. Run WF-00 Preflight for a full report.' },\n\n  // --- Warnings: recorded, never fatal ------------------------------------\n  'W-AI-FAILOVER':      { retryable: false, severity: SEVERITY.WARN, hint: 'Primary provider failed; the backup served this request. Recorded for audit.' },\n  'W-TEMPLATE-DEFAULT': { retryable: false, severity: SEVERITY.WARN, hint: 'No role-specific template matched; the default template was used.' },\n  'W-REPLY-LOWCONF':    { retryable: false, severity: SEVERITY.WARN, hint: 'Reply intent classified with low confidence. Flagged for a human.' },\n  'E-UNKNOWN':          { retryable: false, severity: SEVERITY.ERROR, hint: 'Unclassified failure. The raw message is in the Errors tab.' },\n};\n\nclass AppError extends Error {\n  /**\n   * @param {string} code   a key of ERROR_CATALOGUE\n   * @param {string} message one-line, human-readable, safe to show in the dashboard\n   * @param {object} [details] structured context; never include resume text or PII\n   */\n  constructor(code, message, details = {}) {\n    super(message);\n    this.name = 'AppError';\n    const meta = ERROR_CATALOGUE[code] || ERROR_CATALOGUE['E-UNKNOWN'];\n    this.code = ERROR_CATALOGUE[code] ? code : 'E-UNKNOWN';\n    this.retryable = meta.retryable;\n    this.severity = meta.severity;\n    this.park = meta.park === true;\n    this.hint = meta.hint;\n    this.details = details;\n  }\n\n  /** Flat shape written to the Errors / Applicants tabs. */\n  toRow() {\n    return {\n      error_code: this.code,\n      error_message: this.message,\n      severity: this.severity,\n      retryable: this.retryable,\n      hint: this.hint,\n      details_json: safeJson(this.details),\n    };\n  }\n}\n\n/** Wrap anything thrown — including non-Error values — into an AppError. */\nfunction toAppError(err, fallbackCode = 'E-UNKNOWN') {\n  if (err instanceof AppError) return err;\n  if (err && err.code && ERROR_CATALOGUE[err.code]) {\n    return new AppError(err.code, err.message || String(err), err.details || {});\n  }\n  const message = err && err.message ? err.message : String(err);\n  return new AppError(fallbackCode, message, {});\n}\n\nfunction isRetryable(code) {\n  const meta = ERROR_CATALOGUE[code];\n  return meta ? meta.retryable === true : false;\n}\n\nfunction isPark(code) {\n  const meta = ERROR_CATALOGUE[code];\n  return meta ? meta.park === true : false;\n}\n\n/**\n * Map an HTTP failure from an AI provider onto the catalogue.\n * Kept separate from the router so it can be unit-tested against real statuses.\n */\nfunction classifyProviderHttp(status, body) {\n  const text = typeof body === 'string' ? body : safeJson(body);\n  if (status === 401 || status === 403) return new AppError('E-LLM-AUTH', `Provider rejected the API key (HTTP ${status}).`, { status });\n  if (status === 429) {\n    // Groq distinguishes daily from per-minute exhaustion only in the message body.\n    const daily = /per day|daily|TPD|RPD/i.test(text || '');\n    return new AppError(daily ? 'E-QUOTA-TPD' : 'E-QUOTA-RPM', `Rate limited (HTTP 429)${daily ? ' — daily budget' : ''}.`, { status });\n  }\n  if (status >= 500) return new AppError('E-LLM-SERVER', `Provider error (HTTP ${status}).`, { status });\n  return new AppError('E-UNKNOWN', `Unexpected provider response (HTTP ${status}).`, { status });\n}\n\n/** JSON.stringify that never throws and never returns undefined. */\nfunction safeJson(value, maxLen = 4000) {\n  try {\n    const s = JSON.stringify(value, replacerDropPii);\n    if (s === undefined) return '';\n    return s.length > maxLen ? s.slice(0, maxLen) + '…[truncated]' : s;\n  } catch (_e) {\n    return '\"[unserialisable]\"';\n  }\n}\n\n/** Defence in depth: candidate prose must never reach a log line. */\nconst PII_KEYS = new Set(['resume_text', 'resume_md', 'email_html', 'body', 'html', 'snippet']);\nfunction replacerDropPii(key, value) {\n  if (PII_KEYS.has(key) && typeof value === 'string') return `[redacted:${value.length}chars]`;\n  return value;\n}\n\n// ===== lib/schema.js =====\n\n/**\n * The sheet contract. This file is the single source of truth for tab names,\n * column order, and the stage machine — the bootstrap script, the n8n\n * workflows, and the dashboard all read it, so a column can only be renamed in\n * one place.\n *\n * V2 columns are declared here already (marked `v2: true`) but the bootstrap\n * only creates them when BOOTSTRAP_V2=true, so V1 sheets stay narrow.\n */\n\nconst STAGE = {\n  NEW: 'NEW',\n  DRAFTED: 'DRAFTED',\n  APPROVED: 'APPROVED',\n  SENT: 'SENT',\n  REPLIED: 'REPLIED',\n  CLOSED: 'CLOSED',\n  FAILED: 'FAILED',\n  // V2\n  PARSED: 'PARSED',\n  SCORED: 'SCORED',\n  SHORTLISTED: 'SHORTLISTED',\n  REJECTED: 'REJECTED',\n};\n\nconst STATUS = { OK: 'ok', PENDING: 'pending', FAILED: 'failed', BLOCKED: 'blocked' };\n\n/** Allowed forward transitions. FAILED can always roll back to its origin on retry. */\nconst TRANSITIONS = {\n  NEW: ['DRAFTED', 'FAILED', 'PARSED', 'REJECTED'],\n  PARSED: ['SCORED', 'FAILED'],\n  SCORED: ['SHORTLISTED', 'REJECTED', 'DRAFTED', 'FAILED'],\n  SHORTLISTED: ['DRAFTED', 'REJECTED', 'FAILED'],\n  DRAFTED: ['APPROVED', 'DRAFTED', 'FAILED'],\n  APPROVED: ['SENT', 'DRAFTED', 'FAILED'],\n  SENT: ['REPLIED', 'CLOSED', 'FAILED'],\n  REPLIED: ['CLOSED', 'DRAFTED', 'FAILED'],\n  REJECTED: ['CLOSED'],\n  CLOSED: [],\n  FAILED: ['NEW', 'PARSED', 'SCORED', 'DRAFTED', 'APPROVED', 'SENT'],\n};\n\nfunction canTransition(from, to) {\n  if (!from) return to === STAGE.NEW;\n  const allowed = TRANSITIONS[from];\n  return Array.isArray(allowed) && allowed.includes(to);\n}\n\nconst TABS = {\n  Applicants: [\n    'applicant_id', 'created_at', 'name', 'email', 'phone', 'job_role', 'category',\n    'resume_link', 'resume_file_id', 'source', 'stage', 'status',\n    'template_id', 'email_subject', 'email_html', 'email_status', 'sent_at',\n    'thread_id', 'message_id', 'reply_state', 'approved_by', 'approved_at',\n    'error_code', 'error_message', 'correlation_id', 'updated_at',\n    { name: 'resume_md_link', v2: true },\n    { name: 'match_percent', v2: true },\n    { name: 'match_verdict', v2: true },\n    { name: 'scored_at', v2: true },\n    { name: 'scoring_model', v2: true },\n  ],\n  Templates: [\n    'template_id', 'name', 'job_role', 'category', 'stage', 'subject', 'html',\n    'source', 'is_active', 'is_default', 'prompt_version', 'created_at', 'updated_at',\n  ],\n  JobRoles: [\n    'role_id', 'title', 'department', 'is_open', 'created_at',\n    { name: 'jd_markdown', v2: true },\n    { name: 'must_haves', v2: true },\n    { name: 'nice_to_haves', v2: true },\n    { name: 'weights_json', v2: true },\n  ],\n  EmailLog: [\n    'at', 'correlation_id', 'applicant_id', 'to', 'subject', 'provider',\n    'result', 'provider_message_id', 'thread_id', 'dry_run', 'error_code', 'error_message',\n  ],\n  Replies: [\n    'received_at', 'applicant_id', 'thread_id', 'from', 'subject', 'snippet',\n    'classified_intent', 'confidence', 'model', 'handled_by', 'handled_at',\n  ],\n  RunLog: [\n    'started_at', 'correlation_id', 'workflow', 'trigger', 'finished_at',\n    'items_in', 'items_ok', 'items_failed', 'status', 'notes',\n  ],\n  Errors: [\n    'at', 'correlation_id', 'applicant_id', 'workflow', 'node', 'error_code',\n    'error_message', 'severity', 'retryable', 'hint', 'payload_json', 'retry_count', 'resolved',\n  ],\n  Quota: [\n    'provider', 'model', 'window', 'requests_used', 'tokens_used',\n    'requests_limit', 'tokens_limit', 'window_reset_at', 'updated_at',\n  ],\n  Config: ['key', 'value', 'type', 'description', 'updated_at'],\n  Analysis: [\n    { name: 'applicant_id', v2: true }, { name: 'job_role', v2: true },\n    { name: 'match_percent', v2: true }, { name: 'match_verdict', v2: true },\n    { name: 'criteria_json', v2: true }, { name: 'strengths', v2: true },\n    { name: 'gaps', v2: true }, { name: 'evidence_json', v2: true },\n    { name: 'model', v2: true }, { name: 'prompt_version', v2: true },\n    { name: 'scored_at', v2: true }, { name: 'raw_json', v2: true },\n  ],\n};\n\n/** Tabs that exist in V1. Analysis is V2-only. */\nconst V1_TABS = ['Applicants', 'Templates', 'JobRoles', 'EmailLog', 'Replies', 'RunLog', 'Errors', 'Quota', 'Config'];\n\n/** Resolve a tab's column names for the target version. */\nfunction columnsFor(tab, { includeV2 = false } = {}) {\n  const cols = TABS[tab];\n  if (!cols) throw new Error(`Unknown tab: ${tab}`);\n  return cols\n    .filter((c) => (typeof c === 'string' ? true : includeV2 || !c.v2))\n    .map((c) => (typeof c === 'string' ? c : c.name));\n}\n\n/**\n * Contract check. Runs in WF-00 Preflight and in CI, so a drifted sheet is\n * caught before a run rather than halfway through one.\n */\nfunction validateHeaders(tab, actualHeaders, { includeV2 = false } = {}) {\n  const expected = columnsFor(tab, { includeV2 });\n  const actual = (actualHeaders || []).map((h) => String(h || '').trim());\n  const missing = expected.filter((c) => !actual.includes(c));\n  const extra = actual.filter((c) => c && !expected.includes(c));\n  return { ok: missing.length === 0, missing, extra };\n}\n\n/** Defaults seeded into the Config tab. Everything runtime-tunable lives here. */\nconst CONFIG_DEFAULTS = [\n  { key: 'dry_run', value: 'true', type: 'boolean', description: 'When true, WF-03 logs sends instead of sending. Ship with this ON.' },\n  { key: 'toggle_intake', value: 'true', type: 'boolean', description: 'Master switch for WF-01 Intake.' },\n  { key: 'toggle_draft', value: 'true', type: 'boolean', description: 'Master switch for WF-02 Draft generation.' },\n  { key: 'toggle_send', value: 'false', type: 'boolean', description: 'Master switch for WF-03 Send. Off by default — turn on deliberately.' },\n  { key: 'toggle_replies', value: 'true', type: 'boolean', description: 'Master switch for WF-04 Reply watcher.' },\n  { key: 'toggle_followup', value: 'false', type: 'boolean', description: 'Master switch for WF-05 Follow-up drafting.' },\n  { key: 'categories', value: 'Intern,Junior,Mid,Senior,Lead', type: 'list', description: 'Allowed values for Applicants.category.' },\n  { key: 'batch_size', value: '10', type: 'number', description: 'Max applicants processed per draft batch.' },\n  { key: 'followup_days', value: '5', type: 'number', description: 'Days of silence before a follow-up is drafted.' },\n  { key: 'max_resume_mb', value: '10', type: 'number', description: 'Reject resumes larger than this.' },\n  { key: 'reply_confidence_min', value: '0.7', type: 'number', description: 'Below this, a reply is flagged needs_human.' },\n  { key: 'send_daily_cap', value: '400', type: 'number', description: 'Self-imposed cap, kept under the Gmail ~500/day ceiling.' },\n  { key: 'company_name', value: 'Your Company', type: 'string', description: 'Merge field {{company_name}}.' },\n  { key: 'hr_name', value: 'HR Team', type: 'string', description: 'Merge field {{hr_name}}.' },\n  { key: 'hr_signature', value: 'Best regards,<br>HR Team', type: 'string', description: 'Merge field {{hr_signature}}. HTML allowed.' },\n];\n\n// ===== lib/util.js =====\n\n/**\n * Small shared helpers: IDs, config coercion, and the HMAC scheme that lets n8n\n * trust a webhook came from the dashboard.\n */\n\n/**\n * n8n's Code sandbox only exposes built-ins when NODE_FUNCTION_ALLOW_BUILTIN is\n * set. IDs degrade to Math.random without it; HMAC cannot, so it fails with a\n * config error rather than pretending to verify anything.\n */\nlet crypto = null;\ntry { crypto = require('crypto'); } catch (_e) { crypto = null; }\n\n/** Unambiguous alphabet — no 0/O/1/I/L, because these get read aloud and retyped. */\nconst ID_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';\n\nconst defaultRand = () => (crypto ? crypto.randomBytes(1)[0] / 256 : Math.random());\n\nfunction randomId(length = 6, rand = defaultRand) {\n  let out = '';\n  for (let i = 0; i < length; i++) out += ID_ALPHABET[Math.floor(rand() * ID_ALPHABET.length) % ID_ALPHABET.length];\n  return out;\n}\n\n/** APP-20260814-K7M2QX — sortable by eye, unique enough for this volume. */\nfunction makeApplicantId(date = new Date(), rand) {\n  const d = date.toISOString().slice(0, 10).replace(/-/g, '');\n  return `APP-${d}-${randomId(6, rand)}`;\n}\n\n/** One per workflow execution. Ties rows, log lines, and errors together. */\nfunction makeCorrelationId(workflow = 'WF', date = new Date(), rand) {\n  const t = date.toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);\n  return `${workflow}-${t}-${randomId(4, rand)}`;\n}\n\nfunction nowIso(date = new Date()) { return date.toISOString(); }\n\nfunction truthy(v) {\n  if (typeof v === 'boolean') return v;\n  return ['true', 'yes', '1', 'y', 'on'].includes(String(v == null ? '' : v).trim().toLowerCase());\n}\n\n/**\n * Turn the Config tab's rows into a typed object.\n * Unknown types fall through as strings rather than throwing — a bad `type`\n * cell should not take the pipeline down.\n */\nfunction parseConfig(rows) {\n  const out = {};\n  for (const r of rows || []) {\n    const key = String(r.key || '').trim();\n    if (!key) continue;\n    const raw = r.value == null ? '' : String(r.value);\n    switch (String(r.type || 'string').trim().toLowerCase()) {\n      case 'boolean': out[key] = truthy(raw); break;\n      case 'number': { const n = Number(raw); out[key] = Number.isFinite(n) ? n : 0; break; }\n      case 'list': out[key] = raw.split(',').map((s) => s.trim()).filter(Boolean); break;\n      case 'json': try { out[key] = JSON.parse(raw); } catch (_e) { out[key] = null; } break;\n      default: out[key] = raw;\n    }\n  }\n  return out;\n}\n\n/** Chunk a list so batches respect Sheets write limits and model rate limits. */\nfunction chunk(items, size) {\n  const out = [];\n  const n = Math.max(1, Number(size) || 1);\n  for (let i = 0; i < (items || []).length; i += n) out.push(items.slice(i, i + n));\n  return out;\n}\n\n/** Google Sheets caps a cell at 50k characters; truncate visibly, never silently. */\nconst CELL_LIMIT = 49000;\nfunction fitCell(value) {\n  const s = value == null ? '' : String(value);\n  return s.length <= CELL_LIMIT ? s : s.slice(0, CELL_LIMIT) + '\\n<!-- truncated for sheet cell limit -->';\n}\n\n// --- Webhook signing --------------------------------------------------------\n\n/**\n * The dashboard signs `${timestamp}.${body}`; n8n recomputes and compares.\n * Timestamp is inside the signed payload so a captured request cannot be\n * replayed outside the tolerance window.\n */\nfunction requireCrypto() {\n  if (!crypto) {\n    throw new Error('E-CONFIG-MISSING: node:crypto is unavailable in this sandbox. Set NODE_FUNCTION_ALLOW_BUILTIN=crypto on the n8n container — webhook signatures cannot be verified without it.');\n  }\n  return crypto;\n}\n\n/**\n * Recursively key-sorted JSON. The dashboard serialises an object, n8n parses\n * it and re-serialises to verify; without canonicalisation any key-order\n * difference across that hop would look like tampering.\n */\nfunction canonicalJson(value) {\n  if (value === null || typeof value !== 'object') return JSON.stringify(value ?? null);\n  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;\n  const keys = Object.keys(value).sort();\n  return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`).join(',')}}`;\n}\n\nfunction signPayload(secret, body, timestamp) {\n  requireCrypto();\n  const ts = String(timestamp);\n  const payload = typeof body === 'string' ? body : canonicalJson(body);\n  const mac = crypto.createHmac('sha256', String(secret)).update(`${ts}.${payload}`).digest('hex');\n  return { signature: `v1=${mac}`, timestamp: ts };\n}\n\nfunction verifySignature(secret, body, timestamp, signature, { toleranceSec = 300, now = Date.now() } = {}) {\n  requireCrypto();\n  if (!secret) return { ok: false, reason: 'no-secret-configured' };\n  if (!signature || !timestamp) return { ok: false, reason: 'missing-signature' };\n\n  const age = Math.abs(now / 1000 - Number(timestamp));\n  if (!Number.isFinite(age)) return { ok: false, reason: 'bad-timestamp' };\n  if (age > toleranceSec) return { ok: false, reason: 'stale-timestamp' };\n\n  const expected = signPayload(secret, body, timestamp).signature;\n  const a = Buffer.from(expected);\n  const b = Buffer.from(String(signature));\n  if (a.length !== b.length) return { ok: false, reason: 'bad-signature' };\n  return crypto.timingSafeEqual(a, b) ? { ok: true } : { ok: false, reason: 'bad-signature' };\n}\n\n// ===== lib/intake.js =====\n\n/**\n * Intake validation and normalisation (WF-01).\n *\n * Deliberately pure: no I/O, no clock, no randomness unless injected. Every\n * rejection produces a typed code, never a silent drop — a blocked row is\n * visible in the dashboard with a reason attached.\n */\n\n\n/**\n * Pragmatic email check. Deliberately not RFC 5322: the goal is to catch typos\n * and empty cells, not to litigate quoted local parts. Anything that passes\n * here still has to survive the mail server.\n */\nconst EMAIL_RE = /^[^\\s@,;:<>()[\\]\\\\]+@[^\\s@.]+(\\.[^\\s@.]+)+$/;\n\nfunction normaliseEmail(raw) {\n  return String(raw == null ? '' : raw).trim().toLowerCase();\n}\n\nfunction isValidEmail(raw) {\n  const e = normaliseEmail(raw);\n  return e.length > 0 && e.length <= 254 && EMAIL_RE.test(e);\n}\n\nfunction normaliseName(raw) {\n  return String(raw == null ? '' : raw).replace(/\\s+/g, ' ').trim();\n}\n\n/** Keep digits and a single leading +; blank rather than guess. */\nfunction normalisePhone(raw) {\n  const s = String(raw == null ? '' : raw).trim();\n  if (!s) return '';\n  const plus = s.startsWith('+') ? '+' : '';\n  const digits = s.replace(/\\D/g, '');\n  return digits ? plus + digits : '';\n}\n\n/** Case- and whitespace-insensitive key for matching roles and categories. */\nfunction slug(raw) {\n  return String(raw == null ? '' : raw).trim().toLowerCase().replace(/[\\s_]+/g, '-').replace(/[^a-z0-9-]/g, '');\n}\n\n/**\n * Pull a Google Drive file ID out of the many link shapes Drive hands out.\n * Returns '' for non-Drive URLs — those are fetched over plain HTTP instead.\n */\nfunction extractDriveFileId(url) {\n  const s = String(url == null ? '' : url).trim();\n  if (!s) return '';\n  const patterns = [\n    /\\/file\\/d\\/([a-zA-Z0-9_-]{10,})/,      // /file/d/<id>/view\n    /[?&]id=([a-zA-Z0-9_-]{10,})/,          // ?id=<id>\n    /\\/document\\/d\\/([a-zA-Z0-9_-]{10,})/,  // Docs\n    /\\/open\\?id=([a-zA-Z0-9_-]{10,})/,\n  ];\n  for (const re of patterns) {\n    const m = s.match(re);\n    if (m) return m[1];\n  }\n  return '';\n}\n\nfunction isHttpUrl(url) {\n  const s = String(url == null ? '' : url).trim();\n  return /^https?:\\/\\/[^\\s]+$/i.test(s);\n}\n\n/** Deterministic dedupe key: one application per person per role. */\nfunction dedupeKey(email, jobRole) {\n  return `${normaliseEmail(email)}::${slug(jobRole)}`;\n}\n\n/**\n * Validate and normalise one raw intake row.\n *\n * @param {object} raw            row as read from the sheet or form webhook\n * @param {object} ctx\n * @param {string[]} ctx.roles        titles from the JobRoles tab\n * @param {string[]} ctx.categories   allowed categories from Config\n * @param {Set<string>} [ctx.seen]    dedupe keys already present\n * @param {string} ctx.correlationId\n * @param {string} ctx.applicantId    pre-minted id (injected, so this stays pure)\n * @param {string} ctx.now            ISO timestamp (injected)\n * @returns {{ok: true, row: object} | {ok: false, error: AppError, row: object}}\n */\nfunction validateIntake(raw, ctx) {\n  const { roles = [], categories = [], seen = new Set(), correlationId = '', applicantId = '', now = '' } = ctx || {};\n\n  const name = normaliseName(raw.name);\n  const email = normaliseEmail(raw.email);\n  const jobRole = normaliseName(raw.job_role);\n  const category = normaliseName(raw.category);\n  const resumeLink = String(raw.resume_link == null ? '' : raw.resume_link).trim();\n\n  const base = {\n    applicant_id: raw.applicant_id || applicantId,\n    created_at: raw.created_at || now,\n    name,\n    email,\n    phone: normalisePhone(raw.phone),\n    job_role: jobRole,\n    category,\n    resume_link: resumeLink,\n    resume_file_id: extractDriveFileId(resumeLink),\n    source: raw.source || 'manual',\n    stage: STAGE.NEW,\n    status: STATUS.OK,\n    email_status: 'none',\n    reply_state: 'none',\n    error_code: '',\n    error_message: '',\n    correlation_id: correlationId,\n    updated_at: now,\n  };\n\n  const fail = (code, message, details) => ({\n    ok: false,\n    error: new AppError(code, message, details),\n    row: { ...base, stage: STAGE.NEW, status: STATUS.BLOCKED },\n  });\n\n  // Order matters: report the most actionable problem first.\n  const missing = [];\n  if (!name) missing.push('name');\n  if (!email) missing.push('email');\n  if (!jobRole) missing.push('job_role');\n  if (missing.length) {\n    return fail('E-INTAKE-MISSING', `Required field(s) empty: ${missing.join(', ')}.`, { missing });\n  }\n\n  if (!isValidEmail(email)) {\n    return fail('E-INTAKE-EMAIL', `\"${email}\" is not a valid email address.`, {});\n  }\n\n  if (roles.length) {\n    const match = roles.find((r) => slug(r) === slug(jobRole));\n    if (!match) {\n      return fail('E-INTAKE-ROLE', `Job role \"${jobRole}\" is not in the JobRoles tab.`, { known: roles.slice(0, 20) });\n    }\n    base.job_role = match; // snap to canonical casing so grouping is exact\n  }\n\n  if (category && categories.length) {\n    const match = categories.find((c) => slug(c) === slug(category));\n    if (!match) {\n      return fail('E-INTAKE-CATEGORY', `Category \"${category}\" is not allowed. Allowed: ${categories.join(', ')}.`, { categories });\n    }\n    base.category = match;\n  }\n\n  if (resumeLink && !isHttpUrl(resumeLink)) {\n    return fail('E-FETCH-TYPE', `resume_link is not an http(s) URL: \"${resumeLink.slice(0, 80)}\".`, {});\n  }\n\n  const key = dedupeKey(base.email, base.job_role);\n  if (seen.has(key)) {\n    return fail('E-INTAKE-DUPE', `${base.email} already has an application for \"${base.job_role}\".`, { key });\n  }\n\n  return { ok: true, row: base, key };\n}\n\n// ===== lib/template.js =====\n\n/**\n * Template selection, merge-field rendering, and HTML sanity checks (WF-02/03).\n *\n * The hard rule enforced here: an email with an unresolved {{merge_field}} is\n * never sendable. It fails as E-MAIL-TEMPLATE before it reaches Gmail, because\n * \"Hi {{name}},\" reaching a candidate is worse than a visible error.\n */\n\nconst FIELD_RE = /\\{\\{\\s*([a-zA-Z0-9_.]+)\\s*\\}\\}/g;\n\n/** Void elements never need a closing tag. */\nconst VOID_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr', '!doctype']);\n\n/** Escape a value destined for an HTML email body. */\nfunction escapeHtml(value) {\n  return String(value == null ? '' : value)\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\n\n/** Every {{field}} referenced by a template, de-duplicated, in first-seen order. */\nfunction extractFields(template) {\n  const out = [];\n  const seen = new Set();\n  let m;\n  FIELD_RE.lastIndex = 0;\n  while ((m = FIELD_RE.exec(String(template || ''))) !== null) {\n    if (!seen.has(m[1])) { seen.add(m[1]); out.push(m[1]); }\n  }\n  return out;\n}\n\n/**\n * Build the merge context for one applicant. Values are raw here; escaping\n * happens at render time so the same context can feed plain-text and HTML.\n */\nfunction buildMergeContext(applicant, config = {}) {\n  const name = String(applicant.name || '').trim();\n  const first = name.split(' ')[0] || name;\n  return {\n    name,\n    first_name: first,\n    email: applicant.email || '',\n    job_role: applicant.job_role || '',\n    category: applicant.category || '',\n    applicant_id: applicant.applicant_id || '',\n    company_name: config.company_name || '',\n    hr_name: config.hr_name || '',\n    hr_signature: config.hr_signature || '',\n    // V2 fields render as empty in V1 rather than blowing up shared templates.\n    match_percent: applicant.match_percent == null ? '' : String(applicant.match_percent),\n  };\n}\n\n/**\n * Render a template. `allowHtmlFields` names context keys whose value is\n * trusted HTML (the signature); everything else is escaped.\n *\n * @returns {{html: string, unresolved: string[], used: string[]}}\n */\nfunction render(template, context, { escape = true, allowHtmlFields = ['hr_signature'] } = {}) {\n  const src = String(template == null ? '' : template);\n  const used = [];\n  const unresolved = [];\n  const allow = new Set(allowHtmlFields);\n\n  const html = src.replace(FIELD_RE, (match, field) => {\n    const value = context ? context[field] : undefined;\n    if (value === undefined || value === null || String(value).trim() === '') {\n      unresolved.push(field);\n      return match; // leave it visible so validation can catch it\n    }\n    used.push(field);\n    return escape && !allow.has(field) ? escapeHtml(value) : String(value);\n  });\n\n  return { html, unresolved: [...new Set(unresolved)], used: [...new Set(used)] };\n}\n\n/**\n * Cheap structural check for generated/uploaded HTML: balanced tags and no\n * script/iframe. Not a full parser — it catches the failure modes an LLM or a\n * hand-pasted template actually produces.\n */\nfunction validateHtml(html) {\n  const problems = [];\n  const src = String(html == null ? '' : html);\n\n  if (!src.trim()) problems.push('Template body is empty.');\n  if (/<script\\b/i.test(src)) problems.push('Contains a <script> tag — not allowed in email.');\n  if (/<iframe\\b/i.test(src)) problems.push('Contains an <iframe> tag — not allowed in email.');\n  if (/\\son[a-z]+\\s*=/i.test(src)) problems.push('Contains an inline event handler (onclick=…) — not allowed in email.');\n\n  const stack = [];\n  const tagRe = /<\\/?([a-zA-Z0-9!-]+)[^>]*?(\\/?)>/g;\n  let m;\n  while ((m = tagRe.exec(src)) !== null) {\n    const raw = m[0];\n    const tag = m[1].toLowerCase();\n    const selfClosing = m[2] === '/';\n    if (VOID_TAGS.has(tag) || selfClosing || raw.startsWith('<!')) continue;\n    if (raw.startsWith('</')) {\n      const open = stack.pop();\n      if (open !== tag) {\n        problems.push(open ? `Mismatched tag: </${tag}> closes <${open}>.` : `Stray closing tag </${tag}>.`);\n        break; // one structural report is enough; the rest cascade\n      }\n    } else {\n      stack.push(tag);\n    }\n  }\n  if (stack.length) problems.push(`Unclosed tag(s): ${[...new Set(stack)].map((t) => `<${t}>`).join(', ')}.`);\n\n  return { ok: problems.length === 0, problems };\n}\n\n/**\n * Pick the best template for an applicant.\n *\n * Specificity wins: an exact role+category match beats role-only, which beats\n * the default. Returns the chosen template plus a warning when it had to fall\n * back, so the row records that it used a generic email.\n */\nfunction selectTemplate(templates, { job_role, category, stage = 'outreach' } = {}) {\n  const active = (templates || []).filter((t) => truthy(t.is_active));\n  if (!active.length) {\n    throw new AppError('E-MAIL-TEMPLATE', 'No active templates exist. Create one in the dashboard before drafting.', {});\n  }\n\n  const eq = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();\n  const stageMatches = active.filter((t) => !t.stage || eq(t.stage, stage));\n  const pool = stageMatches.length ? stageMatches : active;\n\n  const scored = pool.map((t) => {\n    let score = 0;\n    if (t.job_role && eq(t.job_role, job_role)) score += 4;\n    else if (t.job_role) score -= 10; // wrong role is disqualifying, not neutral\n    if (t.category && eq(t.category, category)) score += 2;\n    else if (t.category) score -= 5;\n    if (truthy(t.is_default)) score += 1;\n    return { template: t, score };\n  }).sort((a, b) => b.score - a.score);\n\n  const best = scored[0];\n  if (!best || best.score < 0) {\n    const fallback = pool.find((t) => truthy(t.is_default));\n    if (!fallback) {\n      throw new AppError('E-MAIL-TEMPLATE', `No template matches role \"${job_role}\" and no default template is set.`, { job_role, category });\n    }\n    return { template: fallback, warning: 'W-TEMPLATE-DEFAULT' };\n  }\n  const usedDefault = best.score <= 1 && truthy(best.template.is_default);\n  return { template: best.template, warning: usedDefault ? 'W-TEMPLATE-DEFAULT' : null };\n}\n\n/**\n * Full render + gate. Throws E-MAIL-TEMPLATE when anything would produce a\n * broken email, so callers cannot accidentally proceed.\n *\n * `extras` carries generated values that are not applicant columns — chiefly\n * `ai_body`. Those are trusted HTML because they have already passed\n * checkDraftSchema, so they render unescaped; the final validateHtml pass below\n * is still the backstop.\n */\nfunction renderEmail({ template, applicant, config, extras = {} }) {\n  const ctx = { ...buildMergeContext(applicant, config), ...extras };\n  const allowHtmlFields = ['hr_signature', ...Object.keys(extras)];\n  const subject = render(template.subject || '', ctx, { escape: false });\n  const body = render(template.html || '', ctx, { escape: true, allowHtmlFields });\n\n  const unresolved = [...new Set([...subject.unresolved, ...body.unresolved])];\n  if (unresolved.length) {\n    throw new AppError(\n      'E-MAIL-TEMPLATE',\n      `Unresolved merge field(s): ${unresolved.map((f) => `{{${f}}}`).join(', ')}.`,\n      { unresolved, template_id: template.template_id }\n    );\n  }\n\n  const structure = validateHtml(body.html);\n  if (!structure.ok) {\n    throw new AppError('E-MAIL-TEMPLATE', `Template HTML is invalid: ${structure.problems.join(' ')}`, { template_id: template.template_id });\n  }\n  if (!subject.html.trim()) {\n    throw new AppError('E-MAIL-TEMPLATE', 'Rendered subject is empty.', { template_id: template.template_id });\n  }\n\n  return { subject: subject.html.trim(), html: body.html, template_id: template.template_id };\n}\n\n/** Sheets round-trips booleans as strings; treat them consistently everywhere. */\nfunction truthy(v) {\n  if (typeof v === 'boolean') return v;\n  return ['true', 'yes', '1', 'y', 'x'].includes(String(v == null ? '' : v).trim().toLowerCase());\n}\n\n// ===== lib/ai-router.js =====\n\n/**\n * The AI layer: one entry point for every model call in the system.\n *\n * Responsibilities, in order of importance:\n *   1. Never let a quota error corrupt a row. Exhaustion parks; it does not fail.\n *   2. Fail over Groq -> Gemini on transient errors, and record that it happened\n *      (W-AI-FAILOVER) so degradation is never silent.\n *   3. Enforce the token budget *before* dispatch, so we do not discover the\n *      limit by being rejected.\n *\n * All I/O is injected (`http`, `sleep`, `now`) so this is unit-testable with no\n * network and no real clock. See tests/ai-router.test.mjs.\n */\n\n/**\n * Free-tier limits. PLACEHOLDERS — verify in the Groq / Google AI consoles and\n * override via the Quota tab. The router also self-corrects from live\n * x-ratelimit-* response headers, so a stale number here degrades gracefully.\n */\nconst MODELS = {\n  'groq:llama-3.1-8b-instant':     { provider: 'groq',   model: 'llama-3.1-8b-instant',     rpm: 30, rpd: 14400, tpm: 6000,    tpd: 500000 },\n  'groq:llama-3.3-70b-versatile':  { provider: 'groq',   model: 'llama-3.3-70b-versatile',  rpm: 30, rpd: 1000,  tpm: 12000,   tpd: 100000 },\n  'gemini:gemini-2.0-flash':       { provider: 'gemini', model: 'gemini-2.0-flash',         rpm: 15, rpd: 1500,  tpm: 1000000, tpd: Infinity },\n};\n\n/** Ordered failover chains per task. First entry is primary. */\nconst ROUTES = {\n  draft_email:      ['groq:llama-3.3-70b-versatile', 'gemini:gemini-2.0-flash'],\n  generate_template:['groq:llama-3.3-70b-versatile', 'gemini:gemini-2.0-flash'],\n  classify_reply:   ['groq:llama-3.1-8b-instant', 'gemini:gemini-2.0-flash'],\n  // V2\n  resume_markdown:  ['groq:llama-3.1-8b-instant', 'gemini:gemini-2.0-flash'],\n  score_resume:     ['groq:llama-3.3-70b-versatile', 'gemini:gemini-2.0-flash', 'groq:llama-3.1-8b-instant'],\n};\n\n/**\n * ~4 characters per token. Crude, but it only needs to be right enough to\n * reserve budget; actual usage from the response reconciles the bucket.\n */\nfunction estimateTokens(text) {\n  if (!text) return 0;\n  return Math.ceil(String(text).length / 4);\n}\n\n/** Models emit JSON wrapped in prose or ```json fences more often than not. */\nfunction extractJson(raw) {\n  const text = String(raw == null ? '' : raw).trim();\n  if (!text) return null;\n  const fenced = text.match(/```(?:json)?\\s*([\\s\\S]*?)```/i);\n  const candidates = [fenced ? fenced[1] : null, text].filter(Boolean);\n  for (const c of candidates) {\n    try { return JSON.parse(c.trim()); } catch (_e) { /* try next */ }\n  }\n  // Last resort: the outermost balanced {...} or [...] span.\n  const start = text.search(/[{[]/);\n  if (start === -1) return null;\n  const open = text[start];\n  const close = open === '{' ? '}' : ']';\n  let depth = 0, inStr = false, esc = false;\n  for (let i = start; i < text.length; i++) {\n    const ch = text[i];\n    if (esc) { esc = false; continue; }\n    if (ch === '\\\\') { esc = true; continue; }\n    if (ch === '\"') { inStr = !inStr; continue; }\n    if (inStr) continue;\n    if (ch === open) depth++;\n    else if (ch === close && --depth === 0) {\n      try { return JSON.parse(text.slice(start, i + 1)); } catch (_e) { return null; }\n    }\n  }\n  return null;\n}\n\n/**\n * Token bucket per model, persisted to the Quota tab so it survives restarts.\n * Windows are wall-clock: minute buckets reset on the minute, day buckets at\n * UTC midnight, matching how the providers actually meter.\n */\nclass QuotaLedger {\n  constructor(state = {}, nowFn = () => Date.now()) {\n    this.now = nowFn;\n    this.state = {};\n    for (const [key, v] of Object.entries(state)) this.state[key] = { ...v };\n  }\n\n  _bucket(key) {\n    const t = this.now();\n    const minute = Math.floor(t / 60000);\n    const day = Math.floor(t / 86400000);\n    let b = this.state[key];\n    if (!b) b = this.state[key] = { minute, day, rpm: 0, tpm: 0, rpd: 0, tpd: 0 };\n    if (b.minute !== minute) { b.minute = minute; b.rpm = 0; b.tpm = 0; }\n    if (b.day !== day) { b.day = day; b.rpd = 0; b.tpd = 0; }\n    return b;\n  }\n\n  /**\n   * @returns {{ok: true} | {ok: false, reason: 'rpm'|'tpm'|'rpd'|'tpd', waitMs: number}}\n   */\n  check(key, estTokens, limits) {\n    const l = limits || MODELS[key];\n    if (!l) return { ok: true };\n    const b = this._bucket(key);\n    const t = this.now();\n    const msToNextMinute = 60000 - (t % 60000);\n    const msToNextDay = 86400000 - (t % 86400000);\n\n    if (b.rpd + 1 > l.rpd) return { ok: false, reason: 'rpd', waitMs: msToNextDay };\n    if (b.tpd + estTokens > l.tpd) return { ok: false, reason: 'tpd', waitMs: msToNextDay };\n    if (b.rpm + 1 > l.rpm) return { ok: false, reason: 'rpm', waitMs: msToNextMinute };\n    if (b.tpm + estTokens > l.tpm) return { ok: false, reason: 'tpm', waitMs: msToNextMinute };\n    return { ok: true };\n  }\n\n  /** Reserve before dispatch. */\n  reserve(key, estTokens) {\n    const b = this._bucket(key);\n    b.rpm += 1; b.rpd += 1; b.tpm += estTokens; b.tpd += estTokens;\n    return b;\n  }\n\n  /** Reconcile the estimate against what the provider actually charged. */\n  settle(key, estTokens, actualTokens) {\n    const b = this._bucket(key);\n    const delta = (actualTokens || 0) - estTokens;\n    b.tpm = Math.max(0, b.tpm + delta);\n    b.tpd = Math.max(0, b.tpd + delta);\n    return b;\n  }\n\n  /** Trust the provider's own accounting when it sends headers. */\n  applyHeaders(key, headers) {\n    if (!headers) return;\n    const get = (n) => headers[n] ?? headers[n.toLowerCase()] ?? headers[n.toUpperCase()];\n    const remTokens = Number(get('x-ratelimit-remaining-tokens'));\n    const limTokens = Number(get('x-ratelimit-limit-tokens'));\n    if (Number.isFinite(remTokens) && Number.isFinite(limTokens) && limTokens > 0) {\n      this._bucket(key).tpm = Math.max(0, limTokens - remTokens);\n    }\n    const remReq = Number(get('x-ratelimit-remaining-requests'));\n    const limReq = Number(get('x-ratelimit-limit-requests'));\n    if (Number.isFinite(remReq) && Number.isFinite(limReq) && limReq > 0) {\n      this._bucket(key).rpm = Math.max(0, limReq - remReq);\n    }\n  }\n\n  snapshot() { return JSON.parse(JSON.stringify(this.state)); }\n\n  /**\n   * How many more items of `tokensPerItem` fit today, and how long they take.\n   * This is what the dashboard's ETA panel renders.\n   */\n  forecast(key, tokensPerItem, limits) {\n    const l = limits || MODELS[key];\n    if (!l) return { remainingToday: Infinity, itemsPerMinute: Infinity, etaMinutes: 0 };\n    const b = this._bucket(key);\n    const remainingToday = Math.max(0, Math.floor(Math.min(\n      (l.tpd - b.tpd) / tokensPerItem,\n      l.rpd - b.rpd\n    )));\n    const itemsPerMinute = Math.min(l.tpm / tokensPerItem, l.rpm);\n    return { remainingToday, itemsPerMinute, etaMinutes: (n) => n / itemsPerMinute };\n  }\n}\n\n/** Exponential backoff with full jitter, so parallel workers do not resonate. */\nfunction backoffMs(attempt, base = 2000, cap = 16000, rand = Math.random) {\n  const exp = Math.min(cap, base * Math.pow(2, attempt));\n  return Math.floor(exp / 2 + rand() * (exp / 2));\n}\n\nfunction buildGroqRequest({ model, system, user, json, temperature, maxTokens, apiKey }) {\n  const messages = [];\n  if (system) messages.push({ role: 'system', content: system });\n  messages.push({ role: 'user', content: user });\n  return {\n    method: 'POST',\n    url: 'https://api.groq.com/openai/v1/chat/completions',\n    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },\n    body: {\n      model,\n      messages,\n      temperature: temperature ?? 0.4,\n      max_tokens: maxTokens ?? 2048,\n      ...(json ? { response_format: { type: 'json_object' } } : {}),\n    },\n  };\n}\n\nfunction buildGeminiRequest({ model, system, user, json, temperature, maxTokens, apiKey }) {\n  return {\n    method: 'POST',\n    url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,\n    headers: { 'Content-Type': 'application/json' },\n    body: {\n      contents: [{ role: 'user', parts: [{ text: user }] }],\n      ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),\n      generationConfig: {\n        temperature: temperature ?? 0.4,\n        maxOutputTokens: maxTokens ?? 2048,\n        ...(json ? { responseMimeType: 'application/json' } : {}),\n      },\n    },\n  };\n}\n\nfunction parseGroqResponse(body) {\n  const choice = body && body.choices && body.choices[0];\n  const text = choice && choice.message ? choice.message.content : '';\n  const usage = (body && body.usage) || {};\n  return { text: text || '', tokens: usage.total_tokens || 0, finish: choice ? choice.finish_reason : '' };\n}\n\nfunction parseGeminiResponse(body) {\n  const cand = body && body.candidates && body.candidates[0];\n  if (cand && cand.finishReason === 'SAFETY') {\n    throw new AppError('E-LLM-REFUSAL', 'Gemini blocked the response on safety grounds.', {});\n  }\n  const parts = cand && cand.content && cand.content.parts ? cand.content.parts : [];\n  const text = parts.map((p) => p.text || '').join('');\n  const usage = (body && body.usageMetadata) || {};\n  return { text: text || '', tokens: usage.totalTokenCount || 0, finish: cand ? cand.finishReason : '' };\n}\n\nclass AiRouter {\n  /**\n   * @param {object} opts\n   * @param {(req: object) => Promise<{status:number, body:any, headers:object}>} opts.http\n   * @param {(ms:number)=>Promise<void>} [opts.sleep]\n   * @param {object} opts.keys            { groq, gemini }\n   * @param {QuotaLedger} [opts.ledger]\n   * @param {object} [opts.routes]        override ROUTES\n   * @param {object} [opts.limits]        override MODELS\n   * @param {(msg:string, meta:object)=>void} [opts.log]\n   */\n  constructor(opts) {\n    this.http = opts.http;\n    this.sleep = opts.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));\n    this.keys = opts.keys || {};\n    this.ledger = opts.ledger || new QuotaLedger({}, opts.now);\n    this.routes = opts.routes || ROUTES;\n    this.limits = opts.limits || MODELS;\n    this.log = opts.log || (() => {});\n    this.maxAttemptsPerModel = opts.maxAttemptsPerModel ?? 3;\n    this.rand = opts.rand || Math.random;\n  }\n\n  /**\n   * Run one task through its failover chain.\n   *\n   * @returns {Promise<{text, json, model, provider, tokens, failedOver, warnings, attempts}>}\n   * @throws  {AppError} E-QUOTA-ALL when every model is exhausted (park, retry later)\n   */\n  async complete({ task, system, user, json = false, temperature, maxTokens, schemaCheck }) {\n    const chain = this.routes[task];\n    if (!chain) throw new AppError('E-CONFIG-MISSING', `No model route configured for task \"${task}\".`, { task });\n\n    const estTokens = estimateTokens(system) + estimateTokens(user) + (maxTokens ?? 2048);\n    const warnings = [];\n    const attempts = [];\n    let parked = null;\n    let lastError = null;\n    // A skipped provider (no key, unknown model) must never mask a real failure\n    // further up the chain — otherwise \"Groq returned invalid JSON\" gets\n    // reported as \"no Gemini key\", and the operator debugs the wrong thing.\n    let skipError = null;\n\n    for (let ci = 0; ci < chain.length; ci++) {\n      const key = chain[ci];\n      const spec = this.limits[key];\n      if (!spec) { skipError = skipError || new AppError('E-CONFIG-MISSING', `Unknown model \"${key}\".`, {}); continue; }\n\n      const apiKey = this.keys[spec.provider];\n      if (!apiKey) {\n        skipError = skipError || new AppError('E-CONFIG-MISSING', `No API key configured for provider \"${spec.provider}\".`, { provider: spec.provider });\n        attempts.push({ model: key, outcome: 'no-key' });\n        continue;\n      }\n\n      // Budget gate: skip an exhausted model rather than earning a 429.\n      const gate = this.ledger.check(key, estTokens, spec);\n      if (!gate.ok) {\n        parked = parked || gate;\n        attempts.push({ model: key, outcome: `quota:${gate.reason}` });\n        this.log('quota-skip', { model: key, reason: gate.reason, waitMs: gate.waitMs });\n        continue;\n      }\n\n      for (let attempt = 0; attempt < this.maxAttemptsPerModel; attempt++) {\n        try {\n          const result = await this._callOnce({ key, spec, apiKey, system, user, json, temperature, maxTokens, estTokens });\n\n          if (json) {\n            const parsed = extractJson(result.text);\n            if (parsed === null) {\n              // One repair pass, then give up on this model.\n              const repaired = await this._repairJson({ key, spec, apiKey, system, user, raw: result.text, temperature, maxTokens, estTokens });\n              if (repaired === null) throw new AppError('E-LLM-SCHEMA', 'Model did not return valid JSON, including after a repair attempt.', { model: key });\n              result.json = repaired;\n            } else {\n              result.json = parsed;\n            }\n            if (schemaCheck) {\n              const verdict = schemaCheck(result.json);\n              if (!verdict || verdict.ok !== true) {\n                throw new AppError('E-LLM-SCHEMA', `Response failed schema check: ${(verdict && verdict.reason) || 'unknown'}.`, { model: key });\n              }\n            }\n          }\n\n          if (ci > 0) {\n            warnings.push('W-AI-FAILOVER');\n            this.log('failover', { from: chain[0], to: key, reason: lastError ? lastError.code : 'quota' });\n          }\n          attempts.push({ model: key, outcome: 'ok', tokens: result.tokens });\n          return { ...result, model: spec.model, provider: spec.provider, routeKey: key, failedOver: ci > 0, warnings, attempts };\n        } catch (err) {\n          const appErr = err instanceof AppError ? err : new AppError('E-UNKNOWN', err && err.message ? err.message : String(err), {});\n          lastError = appErr;\n          attempts.push({ model: key, outcome: appErr.code, attempt });\n          this.log('attempt-failed', { model: key, code: appErr.code, attempt });\n\n          if (appErr.park) { parked = { ok: false, reason: appErr.code, waitMs: 60000 }; break; }\n          if (appErr.code === 'E-LLM-AUTH' || appErr.code === 'E-LLM-SCHEMA' || appErr.code === 'E-LLM-REFUSAL') break; // next model\n          if (!appErr.retryable) break;\n          if (attempt < this.maxAttemptsPerModel - 1) {\n            await this.sleep(appErr.retryAfterMs || backoffMs(attempt, 2000, 16000, this.rand));\n          }\n        }\n      }\n    }\n\n    if (parked && !lastError) {\n      throw new AppError('E-QUOTA-ALL', 'All configured models are out of budget for now. Work is parked and will resume automatically.', { attempts, waitMs: parked.waitMs });\n    }\n    // Preference order: a real attempt failure, then a config problem, then quota.\n    const finalErr = lastError || skipError || new AppError('E-QUOTA-ALL', 'No model could serve this request.', { attempts });\n    finalErr.details = { ...(finalErr.details || {}), attempts };\n    throw finalErr;\n  }\n\n  async _callOnce({ key, spec, apiKey, system, user, json, temperature, maxTokens, estTokens }) {\n    const build = spec.provider === 'groq' ? buildGroqRequest : buildGeminiRequest;\n    const req = build({ model: spec.model, system, user, json, temperature, maxTokens, apiKey });\n\n    this.ledger.reserve(key, estTokens);\n    let res;\n    try {\n      res = await this.http(req);\n    } catch (err) {\n      if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|aborted/i.test(String(err && err.message))) {\n        throw new AppError('E-LLM-TIMEOUT', 'Model request timed out.', { model: key });\n      }\n      throw new AppError('E-LLM-SERVER', `Network failure calling ${spec.provider}: ${err && err.message}`, { model: key });\n    }\n\n    this.ledger.applyHeaders(key, res.headers);\n\n    if (res.status < 200 || res.status >= 300) {\n      const err = classifyProviderHttp(res.status, res.body);\n      const retryAfter = res.headers && (res.headers['retry-after'] || res.headers['Retry-After']);\n      if (retryAfter) err.retryAfterMs = Math.min(60000, Number(retryAfter) * 1000 || 0);\n      throw err;\n    }\n\n    const parsed = spec.provider === 'groq' ? parseGroqResponse(res.body) : parseGeminiResponse(res.body);\n    if (!parsed.text || !parsed.text.trim()) throw new AppError('E-LLM-EMPTY', 'Model returned an empty response.', { model: key });\n\n    this.ledger.settle(key, estTokens, parsed.tokens);\n    return { text: parsed.text, tokens: parsed.tokens, finish: parsed.finish };\n  }\n\n  async _repairJson({ key, spec, apiKey, system, user, raw, temperature, maxTokens, estTokens }) {\n    try {\n      const repairUser = [\n        'Your previous response was not valid JSON. Return the SAME content as a single valid JSON object.',\n        'Output JSON only — no prose, no markdown fences.',\n        '',\n        '--- previous response ---',\n        String(raw).slice(0, 4000),\n      ].join('\\n');\n      const res = await this._callOnce({ key, spec, apiKey, system, user: repairUser, json: true, temperature: 0, maxTokens, estTokens });\n      return extractJson(res.text);\n    } catch (_e) {\n      return null;\n    }\n  }\n}\n\n// ===== lib/pipeline.js =====\n\n/**\n * Per-workflow decision logic, kept pure so every rule is unit-testable.\n *\n * The n8n Code nodes are deliberately thin wrappers around these functions: I/O\n * in the node, judgement in here.\n */\n\n\n\n\n\n/**\n * A template opts into AI personalisation by containing {{ai_body}}.\n * Templates without it render deterministically and cost zero tokens — which is\n * how HR keeps the quota for the emails that actually need it.\n */\nconst AI_FIELD = 'ai_body';\nfunction usesAi(template) {\n  return extractFields(String(template && template.html || '')).includes(AI_FIELD)\n      || extractFields(String(template && template.subject || '')).includes(AI_FIELD);\n}\n\n// --- WF-01 Intake -----------------------------------------------------------\n\n/**\n * @returns {{rows: object[], errors: object[], stats: object}}\n *   `rows` are ready to write back (valid rows AND blocked rows — a blocked row\n *   must still land in the sheet with its reason, never be dropped).\n */\nfunction planIntake({ rows, roles, categories, correlationId, now = nowIso(), idFactory = makeApplicantId }) {\n  const seen = new Set();\n  // Existing, already-processed rows seed the dedupe set.\n  for (const r of rows || []) {\n    if (r.applicant_id && r.email && r.job_role && r.status !== STATUS.BLOCKED) {\n      seen.add(dedupeKey(r.email, r.job_role));\n    }\n  }\n\n  const out = [];\n  const errors = [];\n  let processed = 0;\n\n  for (const raw of rows || []) {\n    // Only untouched rows are candidates: anything with an id and a stage has\n    // already been through here.\n    if (raw.applicant_id && raw.stage) continue;\n    processed++;\n\n    const result = validateIntake(raw, {\n      roles, categories, seen, correlationId,\n      applicantId: idFactory(new Date(now)),\n      now,\n    });\n\n    if (result.ok) {\n      seen.add(result.key);\n      out.push({ ...raw, ...result.row, _row_number: raw._row_number });\n    } else {\n      const e = result.error;\n      out.push({\n        ...raw, ...result.row,\n        error_code: e.code, error_message: e.message,\n        _row_number: raw._row_number,\n      });\n      errors.push({ applicant_id: result.row.applicant_id, error: e, payload: { email: raw.email, job_role: raw.job_role } });\n    }\n  }\n\n  return { rows: out, errors, stats: { scanned: (rows || []).length, processed, blocked: errors.length } };\n}\n\n// --- WF-02 Drafting ---------------------------------------------------------\n\n/** Which applicants are eligible for a draft right now. */\nfunction selectForDrafting({ applicants, ids = null, batchSize = 10, redraft = false }) {\n  const wanted = ids && ids.length ? new Set(ids) : null;\n  const eligible = (applicants || []).filter((a) => {\n    if (!a.applicant_id) return false;\n    if (wanted) return wanted.has(a.applicant_id);\n    if (a.status === STATUS.BLOCKED) return false;\n    if (redraft) return [STAGE.NEW, STAGE.DRAFTED, STAGE.FAILED, STAGE.SCORED, STAGE.SHORTLISTED].includes(a.stage);\n    return a.stage === STAGE.NEW || (a.stage === STAGE.FAILED && !a.email_subject);\n  });\n  return eligible.slice(0, Math.max(1, batchSize));\n}\n\n/** The user-side prompt for personalising one email. */\nfunction buildDraftPrompt({ applicant, template, config, promptVersion = 'draft-email.v1' }) {\n  const lines = [\n    `Company: ${config.company_name || 'the company'}`,\n    `Candidate name: ${applicant.name}`,\n    `Role applied for: ${applicant.job_role}`,\n    applicant.category ? `Seniority/category: ${applicant.category}` : '',\n    `Sender: ${config.hr_name || 'HR'}`,\n    '',\n    'Write the body of an outreach email to this candidate about their application.',\n    '',\n    'Return JSON only, exactly: {\"subject\": \"...\", \"body_html\": \"...\"}',\n    'Rules for body_html:',\n    '- 2 to 4 short paragraphs, wrapped in <p> tags.',\n    '- Allowed tags: <p> <br> <strong> <em> <ul> <li> <a>. Nothing else.',\n    '- Do not include a greeting line or a sign-off — the template supplies both.',\n    '- Do not invent facts about the candidate, the salary, the interview date, or the process.',\n    '- Do not use placeholders or merge fields of any kind.',\n    `- Address the ${applicant.job_role} role specifically; a generic email is a failure.`,\n  ].filter(Boolean);\n  return { user: lines.join('\\n'), promptVersion, template_id: template && template.template_id };\n}\n\n/** Structural gate on what the model returned, before it reaches a template. */\nfunction checkDraftSchema(json) {\n  if (!json || typeof json !== 'object') return { ok: false, reason: 'not an object' };\n  if (typeof json.subject !== 'string' || !json.subject.trim()) return { ok: false, reason: 'missing subject' };\n  if (typeof json.body_html !== 'string' || !json.body_html.trim()) return { ok: false, reason: 'missing body_html' };\n  if (/\\{\\{|\\}\\}/.test(json.body_html + json.subject)) return { ok: false, reason: 'model emitted merge-field placeholders' };\n  if (/<(script|iframe|style)\\b/i.test(json.body_html)) return { ok: false, reason: 'disallowed tag in body_html' };\n  if (json.body_html.length > 20000) return { ok: false, reason: 'body_html unreasonably long' };\n  return { ok: true };\n}\n\n/**\n * Turn one applicant + one AI result into the draft columns.\n * `ai` is null for templates that do not use {{ai_body}}.\n */\nfunction assembleDraft({ applicant, template, config, ai, correlationId, now = nowIso() }) {\n  const mergeExtras = ai ? { ai_body: ai.body_html } : {};\n  const effectiveTemplate = {\n    ...template,\n    subject: ai && ai.subject && usesAi(template) && String(template.subject || '').includes(`{{${AI_FIELD}}}`)\n      ? ai.subject\n      : template.subject,\n  };\n\n  const rendered = renderEmail({\n    template: effectiveTemplate,\n    applicant,\n    config,\n    extras: mergeExtras,\n  });\n\n  return {\n    applicant_id: applicant.applicant_id,\n    template_id: template.template_id,\n    email_subject: rendered.subject,\n    email_html: fitCell(rendered.html),\n    stage: STAGE.DRAFTED,\n    status: STATUS.OK,\n    error_code: '',\n    error_message: '',\n    correlation_id: correlationId,\n    updated_at: now,\n  };\n}\n\n// --- WF-03 Sending ----------------------------------------------------------\n\n/**\n * Decide what may actually be sent. This is the most safety-critical function\n * in V1: every rejection here is an email that would have embarrassed someone.\n */\nfunction planSends({ applicants, ids, config, sentToday = 0, now = nowIso() }) {\n  const wanted = ids && ids.length ? new Set(ids) : null;\n  const cap = Number(config.send_daily_cap) || 400;\n  const dryRun = truthy(config.dry_run);\n\n  const approved = [];\n  const rejected = [];\n  let budget = Math.max(0, cap - sentToday);\n\n  for (const a of applicants || []) {\n    if (wanted && !wanted.has(a.applicant_id)) continue;\n\n    const reject = (code, msg) => rejected.push({ applicant_id: a.applicant_id, error: new AppError(code, msg, {}) });\n\n    if (a.stage !== STAGE.APPROVED) { reject('E-MAIL-NODRAFT', `Stage is \"${a.stage || 'empty'}\", not APPROVED. Approve the draft before sending.`); continue; }\n    if (!canTransition(a.stage, STAGE.SENT)) { reject('E-MAIL-NODRAFT', `Illegal transition ${a.stage} -> SENT.`); continue; }\n    if (!a.email_subject || !a.email_html) { reject('E-MAIL-NODRAFT', 'Row is APPROVED but has no draft body. Regenerate the draft.'); continue; }\n    if (/\\{\\{[^}]+\\}\\}/.test(String(a.email_subject) + String(a.email_html))) { reject('E-MAIL-TEMPLATE', 'Draft still contains unresolved merge fields. Nothing was sent.'); continue; }\n    if (!isValidEmail(a.email)) { reject('E-MAIL-BOUNCE', `\"${a.email}\" is not a deliverable address.`); continue; }\n    if (a.email_status === 'sent') { reject('E-MAIL-NODRAFT', 'Already sent. Refusing to send a duplicate.'); continue; }\n    if (budget <= 0) { reject('E-MAIL-LIMIT', `Daily send cap of ${cap} reached. Remaining sends resume tomorrow.`); continue; }\n\n    budget--;\n    approved.push({\n      applicant_id: a.applicant_id,\n      to: a.email,\n      name: a.name,\n      subject: a.email_subject,\n      html: a.email_html,\n      dry_run: dryRun,\n      _row_number: a._row_number,\n    });\n  }\n\n  return { approved, rejected, dryRun, capRemaining: budget, now };\n}\n\n/** Post-send row updates, from the Gmail node's result. */\nfunction recordSend({ item, result, correlationId, now = nowIso() }) {\n  const sent = !item.dry_run && result && !result.error;\n  return {\n    applicant: {\n      applicant_id: item.applicant_id,\n      stage: sent ? STAGE.SENT : STAGE.APPROVED,\n      status: sent ? STATUS.OK : STATUS.PENDING,\n      email_status: item.dry_run ? 'dry-run' : (sent ? 'sent' : 'failed'),\n      sent_at: sent ? now : '',\n      thread_id: (result && result.threadId) || '',\n      message_id: (result && result.id) || '',\n      error_code: sent || item.dry_run ? '' : 'E-MAIL-BOUNCE',\n      error_message: sent || item.dry_run ? '' : String((result && result.error) || 'Send failed'),\n      correlation_id: correlationId,\n      updated_at: now,\n    },\n    log: {\n      at: now,\n      correlation_id: correlationId,\n      applicant_id: item.applicant_id,\n      to: item.to,\n      subject: item.subject,\n      provider: 'gmail',\n      result: item.dry_run ? 'dry-run' : (sent ? 'sent' : 'failed'),\n      provider_message_id: (result && result.id) || '',\n      thread_id: (result && result.threadId) || '',\n      dry_run: String(item.dry_run),\n      error_code: sent || item.dry_run ? '' : 'E-MAIL-BOUNCE',\n      error_message: sent || item.dry_run ? '' : String((result && result.error) || ''),\n    },\n  };\n}\n\n// --- WF-04 Replies ----------------------------------------------------------\n\n/** Thread id is authoritative; from-address is the fallback for forwarded mail. */\nfunction matchReply({ message, applicants }) {\n  const threadId = message.threadId || message.thread_id || '';\n  const from = String(message.from || '').toLowerCase();\n  const fromEmail = (from.match(/[\\w.+-]+@[\\w-]+\\.[\\w.-]+/) || [''])[0];\n\n  if (threadId) {\n    const byThread = (applicants || []).find((a) => a.thread_id && a.thread_id === threadId);\n    if (byThread) return { applicant: byThread, matchedBy: 'thread_id' };\n  }\n  if (fromEmail) {\n    const byEmail = (applicants || [])\n      .filter((a) => String(a.email || '').toLowerCase() === fromEmail && a.stage === STAGE.SENT)\n      .sort((a, b) => String(b.sent_at || '').localeCompare(String(a.sent_at || '')));\n    if (byEmail.length) return { applicant: byEmail[0], matchedBy: 'email' };\n  }\n  return { applicant: null, matchedBy: 'none' };\n}\n\nconst REPLY_INTENTS = ['interested', 'declined', 'question', 'out_of_office', 'unclear'];\n\nfunction buildReplyPrompt({ message }) {\n  return [\n    'Classify this reply from a job candidate.',\n    '',\n    'Return JSON only: {\"intent\": \"...\", \"confidence\": 0.0, \"summary\": \"...\"}',\n    `intent must be one of: ${REPLY_INTENTS.join(', ')}.`,\n    'confidence is 0.0-1.0. summary is one sentence, max 140 characters.',\n    'If the message is ambiguous, say \"unclear\" with low confidence rather than guessing.',\n    '',\n    '--- reply ---',\n    String(message.text || message.snippet || '').slice(0, 4000),\n  ].join('\\n');\n}\n\nfunction checkReplySchema(json) {\n  if (!json || typeof json !== 'object') return { ok: false, reason: 'not an object' };\n  if (!REPLY_INTENTS.includes(json.intent)) return { ok: false, reason: `intent \"${json.intent}\" not in the allowed set` };\n  const c = Number(json.confidence);\n  if (!Number.isFinite(c) || c < 0 || c > 1) return { ok: false, reason: 'confidence out of range' };\n  return { ok: true };\n}\n\n/**\n * Low-confidence classifications are escalated, never acted on. The model\n * sorting the inbox is a convenience; it does not get to decide outcomes.\n */\nfunction applyReply({ applicant, message, classification, config, now = nowIso() }) {\n  const min = Number(config.reply_confidence_min ?? 0.7);\n  const confident = Number(classification.confidence) >= min;\n  const intent = confident ? classification.intent : 'unclear';\n  const warnings = confident ? [] : ['W-REPLY-LOWCONF'];\n\n  return {\n    warnings,\n    reply: {\n      received_at: message.received_at || now,\n      applicant_id: applicant.applicant_id,\n      thread_id: message.threadId || applicant.thread_id || '',\n      from: message.from || applicant.email,\n      subject: message.subject || '',\n      snippet: String(message.snippet || message.text || '').slice(0, 500),\n      classified_intent: intent,\n      confidence: Number(classification.confidence) || 0,\n      model: classification.model || '',\n      handled_by: '',\n      handled_at: '',\n    },\n    applicant: {\n      applicant_id: applicant.applicant_id,\n      stage: STAGE.REPLIED,\n      reply_state: confident ? intent : 'needs_human',\n      updated_at: now,\n    },\n  };\n}\n\n// --- WF-05 Follow-ups -------------------------------------------------------\n\n/** Candidates who were emailed, never replied, and are past the silence window. */\nfunction planFollowups({ applicants, config, now = new Date() }) {\n  const days = Number(config.followup_days) || 5;\n  const cutoff = new Date(now.getTime() - days * 86400000);\n  return (applicants || []).filter((a) => {\n    if (a.stage !== STAGE.SENT) return false;\n    if (a.reply_state && a.reply_state !== 'none') return false;\n    if (!a.sent_at) return false;\n    const sent = new Date(a.sent_at);\n    return !Number.isNaN(sent.getTime()) && sent < cutoff;\n  });\n}\n\n// ===== lib/runtime.js =====\n\n/**\n * The seam between the pure engine and n8n's Code-node sandbox.\n *\n * Everything n8n-specific lives here so the rest of the library stays testable\n * with plain Node. `ctx` is the Code node's `this`.\n */\n\n\n/**\n * HTTP adapter shaped for AiRouter.\n *\n * n8n's `this.helpers.httpRequest` is preferred (it respects proxy settings and\n * n8n's own timeouts), with `fetch` as a fallback for sandbox configurations\n * where helpers are not exposed. Non-2xx must come back as a value, not a\n * throw — the router classifies statuses itself.\n */\nfunction makeHttp(ctx, { timeout = 60000 } = {}) {\n  const helper = ctx && ctx.helpers && typeof ctx.helpers.httpRequest === 'function' ? ctx.helpers.httpRequest.bind(ctx.helpers) : null;\n\n  return async function http(req) {\n    if (helper) {\n      const res = await helper({\n        method: req.method,\n        url: req.url,\n        headers: req.headers,\n        body: req.body,\n        json: true,\n        timeout,\n        returnFullResponse: true,\n        ignoreHttpStatusErrors: true,\n      });\n      return { status: res.statusCode || res.status || 200, body: res.body, headers: res.headers || {} };\n    }\n\n    if (typeof fetch !== 'function') {\n      throw new AppError('E-CONFIG-MISSING', 'No HTTP transport available in this n8n Code node (neither this.helpers.httpRequest nor fetch).', {});\n    }\n    const controller = new AbortController();\n    const timer = setTimeout(() => controller.abort(), timeout);\n    try {\n      const res = await fetch(req.url, {\n        method: req.method,\n        headers: req.headers,\n        body: typeof req.body === 'string' ? req.body : JSON.stringify(req.body),\n        signal: controller.signal,\n      });\n      const text = await res.text();\n      let body;\n      try { body = JSON.parse(text); } catch (_e) { body = text; }\n      const headers = {};\n      res.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });\n      return { status: res.status, body, headers };\n    } finally {\n      clearTimeout(timer);\n    }\n  };\n}\n\n/** API keys from the n8n environment. Requires N8N_BLOCK_ENV_ACCESS_IN_NODE=false. */\nfunction apiKeys(env) {\n  const e = env || {};\n  return { groq: e.GROQ_API_KEY || '', gemini: e.GEMINI_API_KEY || '' };\n}\n\n/** `$('Node').all()` -> plain row objects, tolerant of a missing/empty node. */\nfunction rowsOf(items) {\n  if (!items) return [];\n  return items.map((i) => (i && i.json ? i.json : i)).filter(Boolean);\n}\n\n/** Wrap plain objects back into n8n items. */\nfunction toItems(rows) {\n  return (rows || []).map((json) => ({ json }));\n}\n\n/**\n * Standard envelope every workflow's terminal code node returns. The dashboard\n * reads exactly this shape, so a new workflow is legible without new UI.\n */\nfunction envelope({ workflow, correlationId, trigger = 'manual', started, items_in = 0, ok = [], failed = [], warnings = [], notes = '' }) {\n  return {\n    ok: failed.length === 0,\n    workflow,\n    correlation_id: correlationId,\n    trigger,\n    started_at: started,\n    finished_at: nowIso(),\n    items_in,\n    items_ok: ok.length,\n    items_failed: failed.length,\n    status: failed.length === 0 ? 'ok' : (ok.length ? 'partial' : 'failed'),\n    warnings: [...new Set(warnings)],\n    notes,\n    results: ok,\n    errors: failed,\n  };\n}\n\n/** Row shape for the Errors tab. Payloads are PII-redacted by safeJson. */\nfunction errorRow({ correlationId, applicantId = '', workflow, node = '', error, payload = {}, retryCount = 0 }) {\n  const e = toAppError(error);\n  return {\n    at: nowIso(),\n    correlation_id: correlationId,\n    applicant_id: applicantId,\n    workflow,\n    node,\n    error_code: e.code,\n    error_message: e.message,\n    severity: e.severity,\n    retryable: String(e.retryable),\n    hint: e.hint,\n    payload_json: safeJson({ ...payload, details: e.details }),\n    retry_count: retryCount,\n    resolved: 'FALSE',\n  };\n}\n\n/** Row shape for the RunLog tab. */\nfunction runLogRow(env) {\n  return {\n    started_at: env.started_at,\n    correlation_id: env.correlation_id,\n    workflow: env.workflow,\n    trigger: env.trigger,\n    finished_at: env.finished_at,\n    items_in: env.items_in,\n    items_ok: env.items_ok,\n    items_failed: env.items_failed,\n    status: env.status,\n    notes: [env.notes, env.warnings.length ? `warnings: ${env.warnings.join(',')}` : ''].filter(Boolean).join(' | '),\n  };\n}\n\n/**\n * A workflow toggle that is OFF is a normal outcome, not an error: the run\n * ends immediately with a skipped envelope so the dashboard shows why nothing\n * happened.\n */\nfunction skipped({ workflow, correlationId, reason, started }) {\n  return { ...envelope({ workflow, correlationId, started }), ok: true, status: 'skipped', notes: reason };\n}\n\nfunction newCorrelationId(workflow) { return makeCorrelationId(workflow); }\n\n// ===== nodes/wf04-replies.js =====\n\n// @requires errors schema util intake template ai-router pipeline runtime\n//\n// WF-04 Reply watcher. Classification sorts the inbox; it never decides an\n// outcome. Anything below the confidence floor is escalated to a human.\n\nconst started = nowIso();\nconst correlationId = newCorrelationId('WF-04');\nconst WORKFLOW = 'WF-04 Replies';\n\nlet env = {};\ntry { env = $env || {}; } catch (_e) { env = {}; }\n\nconst store = $getWorkflowStaticData('global');\nstore.quota = store.quota || {};\n\nconst reply_rows = [];\nconst applicant_rows = [];\nconst error_rows = [];\nconst warnings = [];\nconst ok = [];\nconst failed = [];\n\ntry {\n  const config = parseConfig(rowsOf($('Read Config').all()));\n  if (!config.toggle_replies) {\n    return [{ json: { ...skipped({ workflow: WORKFLOW, correlationId, started, reason: 'toggle_replies is OFF in the Config tab.' }), reply_rows: [], applicant_rows: [], error_rows: [], runlog_rows: [] } }];\n  }\n\n  const applicants = rowsOf($('Read Applicants').all()).map((r) => ({ ...r, _row_number: r.row_number }));\n  const messages = rowsOf($('Gmail Trigger').all());\n\n  const ledger = new QuotaLedger(store.quota);\n  const router = new AiRouter({\n    http: makeHttp(this, { timeout: 45000 }),\n    keys: apiKeys(env),\n    ledger,\n    log: (msg, meta) => console.log(`[${correlationId}] ${msg}`, JSON.stringify(meta)),\n  });\n\n  for (const raw of messages) {\n    const message = {\n      threadId: raw.threadId || raw.thread_id || '',\n      from: (raw.from && raw.from.value && raw.from.value[0] && raw.from.value[0].address) || raw.From || raw.from || '',\n      subject: raw.subject || raw.Subject || '',\n      snippet: raw.snippet || '',\n      text: raw.text || raw.textPlain || raw.snippet || '',\n      received_at: raw.date || raw.internalDate || started,\n    };\n\n    try {\n      const match = matchReply({ message, applicants });\n      if (!match.applicant) {\n        // Not a candidate reply — ordinary mail in the same mailbox. Skip\n        // quietly; it is not an error and must not raise an alert.\n        continue;\n      }\n\n      const res = await router.complete({\n        task: 'classify_reply',\n        system: 'You classify recruiting email replies. You return JSON only. When in doubt you answer \"unclear\" with low confidence.',\n        user: buildReplyPrompt({ message }),\n        json: true,\n        temperature: 0,\n        maxTokens: 300,\n        schemaCheck: checkReplySchema,\n      });\n\n      const applied = applyReply({\n        applicant: match.applicant,\n        message,\n        classification: { ...res.json, model: res.routeKey },\n        config,\n        now: nowIso(),\n      });\n\n      warnings.push(...applied.warnings, ...(res.warnings || []));\n      reply_rows.push(applied.reply);\n      applicant_rows.push({ ...applied.applicant, row_number: match.applicant._row_number });\n      ok.push({ applicant_id: match.applicant.applicant_id, intent: applied.reply.classified_intent, matched_by: match.matchedBy });\n    } catch (err) {\n      const e = toAppError(err);\n      failed.push({ code: e.code, message: e.message });\n      error_rows.push(errorRow({ correlationId, workflow: WORKFLOW, node: 'Classify Replies', error: e, payload: { thread_id: message.threadId } }));\n      if (e.code === 'E-QUOTA-ALL') break;\n    }\n  }\n\n  store.quota = ledger.snapshot();\n  const env0 = envelope({\n    workflow: WORKFLOW, correlationId, trigger: 'gmail', started,\n    items_in: messages.length, ok, failed, warnings,\n    notes: `${ok.length} reply/replies matched to applicants out of ${messages.length} message(s)`,\n  });\n  return [{ json: { ...env0, reply_rows, applicant_rows: applicant_rows.filter((r) => r.row_number), error_rows, runlog_rows: [runLogRow(env0)] } }];\n} catch (err) {\n  const e = toAppError(err);\n  const env0 = envelope({ workflow: WORKFLOW, correlationId, trigger: 'gmail', started, failed: [{ code: e.code, message: e.message }], notes: e.hint });\n  return [{ json: { ...env0, reply_rows, applicant_rows, error_rows: [...error_rows, errorRow({ correlationId, workflow: WORKFLOW, node: 'Classify Replies', error: e })], runlog_rows: [runLogRow(env0)] } }];\n}"
+      },
+      "id": "wf-04-classify-replies",
+      "position": [
+        1000,
+        180
+      ]
+    },
+    {
+      "name": "Emit Replies",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ---------------------------------------------------------------------\n\n// GENERATED FILE — do not edit inside n8n.\n\n// Source: n8n/src/nodes/emit-replies.js  +  n8n/src/lib/{}.js\n\n// Edit the source and run `npm run build:workflows`.\n\n// ---------------------------------------------------------------------\n\n// ===== nodes/emit-replies.js =====\n\n// @requires\nconst plan = $input.first();\nconst rows = (plan && plan.json && plan.json.reply_rows) || [];\nreturn rows.map((json) => ({ json }));"
+      },
+      "id": "wf-04-emit-replies",
+      "position": [
+        1260,
+        180
+      ]
+    },
+    {
+      "name": "Emit Applicant Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ---------------------------------------------------------------------\n\n// GENERATED FILE — do not edit inside n8n.\n\n// Source: n8n/src/nodes/emit-applicants.js  +  n8n/src/lib/{}.js\n\n// Edit the source and run `npm run build:workflows`.\n\n// ---------------------------------------------------------------------\n\n// ===== nodes/emit-applicants.js =====\n\n// @requires\n// Fan-out helper: turns the plan node's `applicant_rows` into sheet items.\n// Emitting zero items simply stops this branch, which is the correct no-op.\nconst plan = $input.first();\nconst rows = (plan && plan.json && plan.json.applicant_rows) || [];\nreturn rows.map((json) => ({ json }));"
+      },
+      "id": "wf-04-emit-applicant-rows",
+      "position": [
+        1260,
+        360
+      ]
+    },
+    {
+      "name": "Emit Error Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ---------------------------------------------------------------------\n\n// GENERATED FILE — do not edit inside n8n.\n\n// Source: n8n/src/nodes/emit-errors.js  +  n8n/src/lib/{}.js\n\n// Edit the source and run `npm run build:workflows`.\n\n// ---------------------------------------------------------------------\n\n// ===== nodes/emit-errors.js =====\n\n// @requires\nconst plan = $input.first();\nconst rows = (plan && plan.json && plan.json.error_rows) || [];\nreturn rows.map((json) => ({ json }));"
+      },
+      "id": "wf-04-emit-error-rows",
+      "position": [
+        1260,
+        540
+      ]
+    },
+    {
+      "name": "Emit Run Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ---------------------------------------------------------------------\n\n// GENERATED FILE — do not edit inside n8n.\n\n// Source: n8n/src/nodes/emit-runlog.js  +  n8n/src/lib/{}.js\n\n// Edit the source and run `npm run build:workflows`.\n\n// ---------------------------------------------------------------------\n\n// ===== nodes/emit-runlog.js =====\n\n// @requires\nconst plan = $input.first();\nconst rows = (plan && plan.json && plan.json.runlog_rows) || [];\nreturn rows.map((json) => ({ json }));"
+      },
+      "id": "wf-04-emit-run-log",
+      "position": [
+        1260,
+        720
+      ]
+    },
+    {
+      "name": "Append Replies",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Replies",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [],
+          "value": {}
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "hr-sheets-sa",
+          "name": "HR Sheets Service Account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "wf-04-append-replies",
+      "position": [
+        1520,
+        180
+      ]
+    },
+    {
+      "name": "Update Applicants",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Applicants",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [
+            "row_number"
+          ],
+          "value": {}
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "hr-sheets-sa",
+          "name": "HR Sheets Service Account"
+        }
+      },
+      "id": "wf-04-update-applicants",
+      "position": [
+        1520,
+        360
+      ]
+    },
+    {
+      "name": "Append Errors",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Errors",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [],
+          "value": {}
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "hr-sheets-sa",
+          "name": "HR Sheets Service Account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "wf-04-append-errors",
+      "position": [
+        1520,
+        540
+      ]
+    },
+    {
+      "name": "Append Run Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "RunLog",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [],
+          "value": {}
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "hr-sheets-sa",
+          "name": "HR Sheets Service Account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "wf-04-append-run-log",
+      "position": [
+        1520,
+        720
+      ]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Config": {
+      "main": [
+        [
+          {
+            "node": "Read Applicants",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Applicants": {
+      "main": [
+        [
+          {
+            "node": "Classify Replies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Replies": {
+      "main": [
+        [
+          {
+            "node": "Emit Replies",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Emit Applicant Rows",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Emit Error Rows",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Emit Run Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit Replies": {
+      "main": [
+        [
+          {
+            "node": "Append Replies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit Applicant Rows": {
+      "main": [
+        [
+          {
+            "node": "Update Applicants",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit Error Rows": {
+      "main": [
+        [
+          {
+            "node": "Append Errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit Run Log": {
+      "main": [
+        [
+          {
+            "node": "Append Run Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "errorWorkflow": "WF-90 Error Handler"
+  },
+  "tags": [
+    "hr-automation"
+  ],
+  "active": false,
+  "versionId": "wf-04-v1",
+  "meta": {
+    "instanceId": "hr-automation"
+  },
+  "pinData": {}
+}

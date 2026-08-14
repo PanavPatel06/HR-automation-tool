@@ -1,0 +1,283 @@
+{
+  "name": "WF-90 Error Handler",
+  "nodes": [
+    {
+      "name": "On any workflow error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "parameters": {},
+      "id": "wf-90-on-any-workflow-error",
+      "position": [
+        220,
+        180
+      ]
+    },
+    {
+      "name": "Format Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ---------------------------------------------------------------------\n\n// GENERATED FILE — do not edit inside n8n.\n\n// Source: n8n/src/nodes/wf90-error.js  +  n8n/src/lib/{errors,schema,util,runtime}.js\n\n// Edit the source and run `npm run build:workflows`.\n\n// ---------------------------------------------------------------------\n\n// ===== lib/errors.js =====\n\n/**\n * Typed error catalogue. See docs/error-codes.md (canonical prose copy).\n *\n * Every failure in this system carries one of these codes. `retryable` drives\n * the queue behaviour: transient errors back off and retry, permanent errors go\n * straight to a human. `park` means \"not a failure at all — stop and resume\n * later\", used for exhausted daily quotas.\n */\n\nconst SEVERITY = { WARN: 'warn', ERROR: 'error', FATAL: 'fatal' };\n\nconst ERROR_CATALOGUE = {\n  // --- Intake: bad input from the form or a human typing in the sheet -------\n  'E-INTAKE-MISSING': { retryable: false, severity: SEVERITY.ERROR, hint: 'A required field is empty. Fix the row in the Applicants sheet and set status to blank to reprocess.' },\n  'E-INTAKE-EMAIL':   { retryable: false, severity: SEVERITY.ERROR, hint: 'Email address is not parseable. Correct it in the sheet.' },\n  'E-INTAKE-ROLE':    { retryable: false, severity: SEVERITY.ERROR, hint: 'job_role does not match any row in the JobRoles tab. Add the role or correct the spelling.' },\n  'E-INTAKE-DUPE':    { retryable: false, severity: SEVERITY.WARN,  hint: 'This email already has an application for this role. Delete the duplicate row or change the role.' },\n  'E-INTAKE-CATEGORY':{ retryable: false, severity: SEVERITY.ERROR, hint: 'category is not one of the configured values. See the Config tab, key \"categories\".' },\n\n  // --- Resume retrieval ----------------------------------------------------\n  'E-FETCH-404':  { retryable: false, severity: SEVERITY.ERROR, hint: 'Resume link is dead. Ask the candidate to resubmit.' },\n  'E-FETCH-PERM': { retryable: false, severity: SEVERITY.ERROR, hint: 'Drive file is not shared with the service account. Share the folder with the service account email.' },\n  'E-FETCH-SIZE': { retryable: false, severity: SEVERITY.ERROR, hint: 'Resume exceeds the size limit in Config (max_resume_mb).' },\n  'E-FETCH-TYPE': { retryable: false, severity: SEVERITY.ERROR, hint: 'Unsupported file type. Accepted: pdf, doc, docx, txt, md.' },\n  'E-FETCH-NET':  { retryable: true,  severity: SEVERITY.ERROR, hint: 'Network failure while downloading. Will retry.' },\n\n  // --- Model layer ---------------------------------------------------------\n  'E-LLM-TIMEOUT': { retryable: true,  severity: SEVERITY.ERROR, hint: 'Model did not respond in time. Will retry, then fail over to the backup provider.' },\n  'E-LLM-SCHEMA':  { retryable: false, severity: SEVERITY.ERROR, hint: 'Model returned invalid JSON twice, including a repair attempt. Check the prompt version in prompts/.' },\n  'E-LLM-REFUSAL': { retryable: false, severity: SEVERITY.ERROR, hint: 'Model declined to answer. Usually a prompt problem, not a data problem.' },\n  'E-LLM-EMPTY':   { retryable: true,  severity: SEVERITY.ERROR, hint: 'Model returned an empty response. Will retry.' },\n  'E-LLM-AUTH':    { retryable: false, severity: SEVERITY.FATAL,  hint: 'API key rejected. Check GROQ_API_KEY / GEMINI_API_KEY in the n8n environment.' },\n  'E-LLM-SERVER':  { retryable: true,  severity: SEVERITY.ERROR, hint: 'Provider returned 5xx. Will retry, then fail over.' },\n\n  // --- Rate limits. E-QUOTA-TPD is a park, not a failure. ------------------\n  'E-QUOTA-RPM': { retryable: true,  severity: SEVERITY.WARN,  hint: 'Per-minute limit hit. Backing off.' },\n  'E-QUOTA-TPD': { retryable: true,  severity: SEVERITY.WARN,  park: true, hint: 'Daily token budget exhausted for this model. Work parks and resumes at the window reset.' },\n  'E-QUOTA-ALL': { retryable: true,  severity: SEVERITY.FATAL, park: true, hint: 'Every configured provider is exhausted. Nothing is lost — the queue resumes at the next window reset.' },\n\n  // --- Sending -------------------------------------------------------------\n  'E-MAIL-AUTH':     { retryable: false, severity: SEVERITY.FATAL, hint: 'Gmail OAuth credential expired. Reconnect it in n8n > Credentials.' },\n  'E-MAIL-BOUNCE':   { retryable: false, severity: SEVERITY.ERROR, hint: 'Address rejected by the mail server. Correct it in the sheet.' },\n  'E-MAIL-LIMIT':    { retryable: true,  severity: SEVERITY.WARN,  park: true, hint: 'Daily Gmail send cap reached (~500/day on consumer accounts). Remaining sends resume tomorrow.' },\n  'E-MAIL-TEMPLATE': { retryable: false, severity: SEVERITY.ERROR, hint: 'Template still contains unresolved {{merge_fields}}. Nothing was sent.' },\n  'E-MAIL-NODRAFT':  { retryable: false, severity: SEVERITY.ERROR, hint: 'Send was requested for a row with no approved draft. Generate and approve a draft first.' },\n\n  // --- Google Sheets -------------------------------------------------------\n  'E-SHEET-429':    { retryable: true,  severity: SEVERITY.WARN,  hint: 'Sheets API rate limit. Backing off.' },\n  'E-SHEET-PERM':   { retryable: false, severity: SEVERITY.FATAL, hint: 'Spreadsheet is not shared with the service account (needs Editor).' },\n  'E-SHEET-SCHEMA': { retryable: false, severity: SEVERITY.FATAL, hint: 'Expected column is missing. Run `npm run bootstrap:sheets` to repair the headers.' },\n\n  // --- Setup / config ------------------------------------------------------\n  'E-CONFIG-MISSING': { retryable: false, severity: SEVERITY.FATAL, hint: 'A required environment variable is not set. See .env.example.' },\n  'E-CONFIG-CRED':    { retryable: false, severity: SEVERITY.FATAL, hint: 'A credential is invalid or unreachable. Run WF-00 Preflight for a full report.' },\n\n  // --- Warnings: recorded, never fatal ------------------------------------\n  'W-AI-FAILOVER':      { retryable: false, severity: SEVERITY.WARN, hint: 'Primary provider failed; the backup served this request. Recorded for audit.' },\n  'W-TEMPLATE-DEFAULT': { retryable: false, severity: SEVERITY.WARN, hint: 'No role-specific template matched; the default template was used.' },\n  'W-REPLY-LOWCONF':    { retryable: false, severity: SEVERITY.WARN, hint: 'Reply intent classified with low confidence. Flagged for a human.' },\n  'E-UNKNOWN':          { retryable: false, severity: SEVERITY.ERROR, hint: 'Unclassified failure. The raw message is in the Errors tab.' },\n};\n\nclass AppError extends Error {\n  /**\n   * @param {string} code   a key of ERROR_CATALOGUE\n   * @param {string} message one-line, human-readable, safe to show in the dashboard\n   * @param {object} [details] structured context; never include resume text or PII\n   */\n  constructor(code, message, details = {}) {\n    super(message);\n    this.name = 'AppError';\n    const meta = ERROR_CATALOGUE[code] || ERROR_CATALOGUE['E-UNKNOWN'];\n    this.code = ERROR_CATALOGUE[code] ? code : 'E-UNKNOWN';\n    this.retryable = meta.retryable;\n    this.severity = meta.severity;\n    this.park = meta.park === true;\n    this.hint = meta.hint;\n    this.details = details;\n  }\n\n  /** Flat shape written to the Errors / Applicants tabs. */\n  toRow() {\n    return {\n      error_code: this.code,\n      error_message: this.message,\n      severity: this.severity,\n      retryable: this.retryable,\n      hint: this.hint,\n      details_json: safeJson(this.details),\n    };\n  }\n}\n\n/** Wrap anything thrown — including non-Error values — into an AppError. */\nfunction toAppError(err, fallbackCode = 'E-UNKNOWN') {\n  if (err instanceof AppError) return err;\n  if (err && err.code && ERROR_CATALOGUE[err.code]) {\n    return new AppError(err.code, err.message || String(err), err.details || {});\n  }\n  const message = err && err.message ? err.message : String(err);\n  return new AppError(fallbackCode, message, {});\n}\n\nfunction isRetryable(code) {\n  const meta = ERROR_CATALOGUE[code];\n  return meta ? meta.retryable === true : false;\n}\n\nfunction isPark(code) {\n  const meta = ERROR_CATALOGUE[code];\n  return meta ? meta.park === true : false;\n}\n\n/**\n * Map an HTTP failure from an AI provider onto the catalogue.\n * Kept separate from the router so it can be unit-tested against real statuses.\n */\nfunction classifyProviderHttp(status, body) {\n  const text = typeof body === 'string' ? body : safeJson(body);\n  if (status === 401 || status === 403) return new AppError('E-LLM-AUTH', `Provider rejected the API key (HTTP ${status}).`, { status });\n  if (status === 429) {\n    // Groq distinguishes daily from per-minute exhaustion only in the message body.\n    const daily = /per day|daily|TPD|RPD/i.test(text || '');\n    return new AppError(daily ? 'E-QUOTA-TPD' : 'E-QUOTA-RPM', `Rate limited (HTTP 429)${daily ? ' — daily budget' : ''}.`, { status });\n  }\n  if (status >= 500) return new AppError('E-LLM-SERVER', `Provider error (HTTP ${status}).`, { status });\n  return new AppError('E-UNKNOWN', `Unexpected provider response (HTTP ${status}).`, { status });\n}\n\n/** JSON.stringify that never throws and never returns undefined. */\nfunction safeJson(value, maxLen = 4000) {\n  try {\n    const s = JSON.stringify(value, replacerDropPii);\n    if (s === undefined) return '';\n    return s.length > maxLen ? s.slice(0, maxLen) + '…[truncated]' : s;\n  } catch (_e) {\n    return '\"[unserialisable]\"';\n  }\n}\n\n/** Defence in depth: candidate prose must never reach a log line. */\nconst PII_KEYS = new Set(['resume_text', 'resume_md', 'email_html', 'body', 'html', 'snippet']);\nfunction replacerDropPii(key, value) {\n  if (PII_KEYS.has(key) && typeof value === 'string') return `[redacted:${value.length}chars]`;\n  return value;\n}\n\n// ===== lib/schema.js =====\n\n/**\n * The sheet contract. This file is the single source of truth for tab names,\n * column order, and the stage machine — the bootstrap script, the n8n\n * workflows, and the dashboard all read it, so a column can only be renamed in\n * one place.\n *\n * V2 columns are declared here already (marked `v2: true`) but the bootstrap\n * only creates them when BOOTSTRAP_V2=true, so V1 sheets stay narrow.\n */\n\nconst STAGE = {\n  NEW: 'NEW',\n  DRAFTED: 'DRAFTED',\n  APPROVED: 'APPROVED',\n  SENT: 'SENT',\n  REPLIED: 'REPLIED',\n  CLOSED: 'CLOSED',\n  FAILED: 'FAILED',\n  // V2\n  PARSED: 'PARSED',\n  SCORED: 'SCORED',\n  SHORTLISTED: 'SHORTLISTED',\n  REJECTED: 'REJECTED',\n};\n\nconst STATUS = { OK: 'ok', PENDING: 'pending', FAILED: 'failed', BLOCKED: 'blocked' };\n\n/** Allowed forward transitions. FAILED can always roll back to its origin on retry. */\nconst TRANSITIONS = {\n  NEW: ['DRAFTED', 'FAILED', 'PARSED', 'REJECTED'],\n  PARSED: ['SCORED', 'FAILED'],\n  SCORED: ['SHORTLISTED', 'REJECTED', 'DRAFTED', 'FAILED'],\n  SHORTLISTED: ['DRAFTED', 'REJECTED', 'FAILED'],\n  DRAFTED: ['APPROVED', 'DRAFTED', 'FAILED'],\n  APPROVED: ['SENT', 'DRAFTED', 'FAILED'],\n  SENT: ['REPLIED', 'CLOSED', 'FAILED'],\n  REPLIED: ['CLOSED', 'DRAFTED', 'FAILED'],\n  REJECTED: ['CLOSED'],\n  CLOSED: [],\n  FAILED: ['NEW', 'PARSED', 'SCORED', 'DRAFTED', 'APPROVED', 'SENT'],\n};\n\nfunction canTransition(from, to) {\n  if (!from) return to === STAGE.NEW;\n  const allowed = TRANSITIONS[from];\n  return Array.isArray(allowed) && allowed.includes(to);\n}\n\nconst TABS = {\n  Applicants: [\n    'applicant_id', 'created_at', 'name', 'email', 'phone', 'job_role', 'category',\n    'resume_link', 'resume_file_id', 'source', 'stage', 'status',\n    'template_id', 'email_subject', 'email_html', 'email_status', 'sent_at',\n    'thread_id', 'message_id', 'reply_state', 'approved_by', 'approved_at',\n    'error_code', 'error_message', 'correlation_id', 'updated_at',\n    { name: 'resume_md_link', v2: true },\n    { name: 'match_percent', v2: true },\n    { name: 'match_verdict', v2: true },\n    { name: 'scored_at', v2: true },\n    { name: 'scoring_model', v2: true },\n  ],\n  Templates: [\n    'template_id', 'name', 'job_role', 'category', 'stage', 'subject', 'html',\n    'source', 'is_active', 'is_default', 'prompt_version', 'created_at', 'updated_at',\n  ],\n  JobRoles: [\n    'role_id', 'title', 'department', 'is_open', 'created_at',\n    { name: 'jd_markdown', v2: true },\n    { name: 'must_haves', v2: true },\n    { name: 'nice_to_haves', v2: true },\n    { name: 'weights_json', v2: true },\n  ],\n  EmailLog: [\n    'at', 'correlation_id', 'applicant_id', 'to', 'subject', 'provider',\n    'result', 'provider_message_id', 'thread_id', 'dry_run', 'error_code', 'error_message',\n  ],\n  Replies: [\n    'received_at', 'applicant_id', 'thread_id', 'from', 'subject', 'snippet',\n    'classified_intent', 'confidence', 'model', 'handled_by', 'handled_at',\n  ],\n  RunLog: [\n    'started_at', 'correlation_id', 'workflow', 'trigger', 'finished_at',\n    'items_in', 'items_ok', 'items_failed', 'status', 'notes',\n  ],\n  Errors: [\n    'at', 'correlation_id', 'applicant_id', 'workflow', 'node', 'error_code',\n    'error_message', 'severity', 'retryable', 'hint', 'payload_json', 'retry_count', 'resolved',\n  ],\n  Quota: [\n    'provider', 'model', 'window', 'requests_used', 'tokens_used',\n    'requests_limit', 'tokens_limit', 'window_reset_at', 'updated_at',\n  ],\n  Config: ['key', 'value', 'type', 'description', 'updated_at'],\n  Analysis: [\n    { name: 'applicant_id', v2: true }, { name: 'job_role', v2: true },\n    { name: 'match_percent', v2: true }, { name: 'match_verdict', v2: true },\n    { name: 'criteria_json', v2: true }, { name: 'strengths', v2: true },\n    { name: 'gaps', v2: true }, { name: 'evidence_json', v2: true },\n    { name: 'model', v2: true }, { name: 'prompt_version', v2: true },\n    { name: 'scored_at', v2: true }, { name: 'raw_json', v2: true },\n  ],\n};\n\n/** Tabs that exist in V1. Analysis is V2-only. */\nconst V1_TABS = ['Applicants', 'Templates', 'JobRoles', 'EmailLog', 'Replies', 'RunLog', 'Errors', 'Quota', 'Config'];\n\n/** Resolve a tab's column names for the target version. */\nfunction columnsFor(tab, { includeV2 = false } = {}) {\n  const cols = TABS[tab];\n  if (!cols) throw new Error(`Unknown tab: ${tab}`);\n  return cols\n    .filter((c) => (typeof c === 'string' ? true : includeV2 || !c.v2))\n    .map((c) => (typeof c === 'string' ? c : c.name));\n}\n\n/**\n * Contract check. Runs in WF-00 Preflight and in CI, so a drifted sheet is\n * caught before a run rather than halfway through one.\n */\nfunction validateHeaders(tab, actualHeaders, { includeV2 = false } = {}) {\n  const expected = columnsFor(tab, { includeV2 });\n  const actual = (actualHeaders || []).map((h) => String(h || '').trim());\n  const missing = expected.filter((c) => !actual.includes(c));\n  const extra = actual.filter((c) => c && !expected.includes(c));\n  return { ok: missing.length === 0, missing, extra };\n}\n\n/** Defaults seeded into the Config tab. Everything runtime-tunable lives here. */\nconst CONFIG_DEFAULTS = [\n  { key: 'dry_run', value: 'true', type: 'boolean', description: 'When true, WF-03 logs sends instead of sending. Ship with this ON.' },\n  { key: 'toggle_intake', value: 'true', type: 'boolean', description: 'Master switch for WF-01 Intake.' },\n  { key: 'toggle_draft', value: 'true', type: 'boolean', description: 'Master switch for WF-02 Draft generation.' },\n  { key: 'toggle_send', value: 'false', type: 'boolean', description: 'Master switch for WF-03 Send. Off by default — turn on deliberately.' },\n  { key: 'toggle_replies', value: 'true', type: 'boolean', description: 'Master switch for WF-04 Reply watcher.' },\n  { key: 'toggle_followup', value: 'false', type: 'boolean', description: 'Master switch for WF-05 Follow-up drafting.' },\n  { key: 'categories', value: 'Intern,Junior,Mid,Senior,Lead', type: 'list', description: 'Allowed values for Applicants.category.' },\n  { key: 'batch_size', value: '10', type: 'number', description: 'Max applicants processed per draft batch.' },\n  { key: 'followup_days', value: '5', type: 'number', description: 'Days of silence before a follow-up is drafted.' },\n  { key: 'max_resume_mb', value: '10', type: 'number', description: 'Reject resumes larger than this.' },\n  { key: 'reply_confidence_min', value: '0.7', type: 'number', description: 'Below this, a reply is flagged needs_human.' },\n  { key: 'send_daily_cap', value: '400', type: 'number', description: 'Self-imposed cap, kept under the Gmail ~500/day ceiling.' },\n  { key: 'company_name', value: 'Your Company', type: 'string', description: 'Merge field {{company_name}}.' },\n  { key: 'hr_name', value: 'HR Team', type: 'string', description: 'Merge field {{hr_name}}.' },\n  { key: 'hr_signature', value: 'Best regards,<br>HR Team', type: 'string', description: 'Merge field {{hr_signature}}. HTML allowed.' },\n];\n\n// ===== lib/util.js =====\n\n/**\n * Small shared helpers: IDs, config coercion, and the HMAC scheme that lets n8n\n * trust a webhook came from the dashboard.\n */\n\n/**\n * n8n's Code sandbox only exposes built-ins when NODE_FUNCTION_ALLOW_BUILTIN is\n * set. IDs degrade to Math.random without it; HMAC cannot, so it fails with a\n * config error rather than pretending to verify anything.\n */\nlet crypto = null;\ntry { crypto = require('crypto'); } catch (_e) { crypto = null; }\n\n/** Unambiguous alphabet — no 0/O/1/I/L, because these get read aloud and retyped. */\nconst ID_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';\n\nconst defaultRand = () => (crypto ? crypto.randomBytes(1)[0] / 256 : Math.random());\n\nfunction randomId(length = 6, rand = defaultRand) {\n  let out = '';\n  for (let i = 0; i < length; i++) out += ID_ALPHABET[Math.floor(rand() * ID_ALPHABET.length) % ID_ALPHABET.length];\n  return out;\n}\n\n/** APP-20260814-K7M2QX — sortable by eye, unique enough for this volume. */\nfunction makeApplicantId(date = new Date(), rand) {\n  const d = date.toISOString().slice(0, 10).replace(/-/g, '');\n  return `APP-${d}-${randomId(6, rand)}`;\n}\n\n/** One per workflow execution. Ties rows, log lines, and errors together. */\nfunction makeCorrelationId(workflow = 'WF', date = new Date(), rand) {\n  const t = date.toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);\n  return `${workflow}-${t}-${randomId(4, rand)}`;\n}\n\nfunction nowIso(date = new Date()) { return date.toISOString(); }\n\nfunction truthy(v) {\n  if (typeof v === 'boolean') return v;\n  return ['true', 'yes', '1', 'y', 'on'].includes(String(v == null ? '' : v).trim().toLowerCase());\n}\n\n/**\n * Turn the Config tab's rows into a typed object.\n * Unknown types fall through as strings rather than throwing — a bad `type`\n * cell should not take the pipeline down.\n */\nfunction parseConfig(rows) {\n  const out = {};\n  for (const r of rows || []) {\n    const key = String(r.key || '').trim();\n    if (!key) continue;\n    const raw = r.value == null ? '' : String(r.value);\n    switch (String(r.type || 'string').trim().toLowerCase()) {\n      case 'boolean': out[key] = truthy(raw); break;\n      case 'number': { const n = Number(raw); out[key] = Number.isFinite(n) ? n : 0; break; }\n      case 'list': out[key] = raw.split(',').map((s) => s.trim()).filter(Boolean); break;\n      case 'json': try { out[key] = JSON.parse(raw); } catch (_e) { out[key] = null; } break;\n      default: out[key] = raw;\n    }\n  }\n  return out;\n}\n\n/** Chunk a list so batches respect Sheets write limits and model rate limits. */\nfunction chunk(items, size) {\n  const out = [];\n  const n = Math.max(1, Number(size) || 1);\n  for (let i = 0; i < (items || []).length; i += n) out.push(items.slice(i, i + n));\n  return out;\n}\n\n/** Google Sheets caps a cell at 50k characters; truncate visibly, never silently. */\nconst CELL_LIMIT = 49000;\nfunction fitCell(value) {\n  const s = value == null ? '' : String(value);\n  return s.length <= CELL_LIMIT ? s : s.slice(0, CELL_LIMIT) + '\\n<!-- truncated for sheet cell limit -->';\n}\n\n// --- Webhook signing --------------------------------------------------------\n\n/**\n * The dashboard signs `${timestamp}.${body}`; n8n recomputes and compares.\n * Timestamp is inside the signed payload so a captured request cannot be\n * replayed outside the tolerance window.\n */\nfunction requireCrypto() {\n  if (!crypto) {\n    throw new Error('E-CONFIG-MISSING: node:crypto is unavailable in this sandbox. Set NODE_FUNCTION_ALLOW_BUILTIN=crypto on the n8n container — webhook signatures cannot be verified without it.');\n  }\n  return crypto;\n}\n\n/**\n * Recursively key-sorted JSON. The dashboard serialises an object, n8n parses\n * it and re-serialises to verify; without canonicalisation any key-order\n * difference across that hop would look like tampering.\n */\nfunction canonicalJson(value) {\n  if (value === null || typeof value !== 'object') return JSON.stringify(value ?? null);\n  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;\n  const keys = Object.keys(value).sort();\n  return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`).join(',')}}`;\n}\n\nfunction signPayload(secret, body, timestamp) {\n  requireCrypto();\n  const ts = String(timestamp);\n  const payload = typeof body === 'string' ? body : canonicalJson(body);\n  const mac = crypto.createHmac('sha256', String(secret)).update(`${ts}.${payload}`).digest('hex');\n  return { signature: `v1=${mac}`, timestamp: ts };\n}\n\nfunction verifySignature(secret, body, timestamp, signature, { toleranceSec = 300, now = Date.now() } = {}) {\n  requireCrypto();\n  if (!secret) return { ok: false, reason: 'no-secret-configured' };\n  if (!signature || !timestamp) return { ok: false, reason: 'missing-signature' };\n\n  const age = Math.abs(now / 1000 - Number(timestamp));\n  if (!Number.isFinite(age)) return { ok: false, reason: 'bad-timestamp' };\n  if (age > toleranceSec) return { ok: false, reason: 'stale-timestamp' };\n\n  const expected = signPayload(secret, body, timestamp).signature;\n  const a = Buffer.from(expected);\n  const b = Buffer.from(String(signature));\n  if (a.length !== b.length) return { ok: false, reason: 'bad-signature' };\n  return crypto.timingSafeEqual(a, b) ? { ok: true } : { ok: false, reason: 'bad-signature' };\n}\n\n// ===== lib/runtime.js =====\n\n/**\n * The seam between the pure engine and n8n's Code-node sandbox.\n *\n * Everything n8n-specific lives here so the rest of the library stays testable\n * with plain Node. `ctx` is the Code node's `this`.\n */\n\n\n/**\n * HTTP adapter shaped for AiRouter.\n *\n * n8n's `this.helpers.httpRequest` is preferred (it respects proxy settings and\n * n8n's own timeouts), with `fetch` as a fallback for sandbox configurations\n * where helpers are not exposed. Non-2xx must come back as a value, not a\n * throw — the router classifies statuses itself.\n */\nfunction makeHttp(ctx, { timeout = 60000 } = {}) {\n  const helper = ctx && ctx.helpers && typeof ctx.helpers.httpRequest === 'function' ? ctx.helpers.httpRequest.bind(ctx.helpers) : null;\n\n  return async function http(req) {\n    if (helper) {\n      const res = await helper({\n        method: req.method,\n        url: req.url,\n        headers: req.headers,\n        body: req.body,\n        json: true,\n        timeout,\n        returnFullResponse: true,\n        ignoreHttpStatusErrors: true,\n      });\n      return { status: res.statusCode || res.status || 200, body: res.body, headers: res.headers || {} };\n    }\n\n    if (typeof fetch !== 'function') {\n      throw new AppError('E-CONFIG-MISSING', 'No HTTP transport available in this n8n Code node (neither this.helpers.httpRequest nor fetch).', {});\n    }\n    const controller = new AbortController();\n    const timer = setTimeout(() => controller.abort(), timeout);\n    try {\n      const res = await fetch(req.url, {\n        method: req.method,\n        headers: req.headers,\n        body: typeof req.body === 'string' ? req.body : JSON.stringify(req.body),\n        signal: controller.signal,\n      });\n      const text = await res.text();\n      let body;\n      try { body = JSON.parse(text); } catch (_e) { body = text; }\n      const headers = {};\n      res.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });\n      return { status: res.status, body, headers };\n    } finally {\n      clearTimeout(timer);\n    }\n  };\n}\n\n/** API keys from the n8n environment. Requires N8N_BLOCK_ENV_ACCESS_IN_NODE=false. */\nfunction apiKeys(env) {\n  const e = env || {};\n  return { groq: e.GROQ_API_KEY || '', gemini: e.GEMINI_API_KEY || '' };\n}\n\n/** `$('Node').all()` -> plain row objects, tolerant of a missing/empty node. */\nfunction rowsOf(items) {\n  if (!items) return [];\n  return items.map((i) => (i && i.json ? i.json : i)).filter(Boolean);\n}\n\n/** Wrap plain objects back into n8n items. */\nfunction toItems(rows) {\n  return (rows || []).map((json) => ({ json }));\n}\n\n/**\n * Standard envelope every workflow's terminal code node returns. The dashboard\n * reads exactly this shape, so a new workflow is legible without new UI.\n */\nfunction envelope({ workflow, correlationId, trigger = 'manual', started, items_in = 0, ok = [], failed = [], warnings = [], notes = '' }) {\n  return {\n    ok: failed.length === 0,\n    workflow,\n    correlation_id: correlationId,\n    trigger,\n    started_at: started,\n    finished_at: nowIso(),\n    items_in,\n    items_ok: ok.length,\n    items_failed: failed.length,\n    status: failed.length === 0 ? 'ok' : (ok.length ? 'partial' : 'failed'),\n    warnings: [...new Set(warnings)],\n    notes,\n    results: ok,\n    errors: failed,\n  };\n}\n\n/** Row shape for the Errors tab. Payloads are PII-redacted by safeJson. */\nfunction errorRow({ correlationId, applicantId = '', workflow, node = '', error, payload = {}, retryCount = 0 }) {\n  const e = toAppError(error);\n  return {\n    at: nowIso(),\n    correlation_id: correlationId,\n    applicant_id: applicantId,\n    workflow,\n    node,\n    error_code: e.code,\n    error_message: e.message,\n    severity: e.severity,\n    retryable: String(e.retryable),\n    hint: e.hint,\n    payload_json: safeJson({ ...payload, details: e.details }),\n    retry_count: retryCount,\n    resolved: 'FALSE',\n  };\n}\n\n/** Row shape for the RunLog tab. */\nfunction runLogRow(env) {\n  return {\n    started_at: env.started_at,\n    correlation_id: env.correlation_id,\n    workflow: env.workflow,\n    trigger: env.trigger,\n    finished_at: env.finished_at,\n    items_in: env.items_in,\n    items_ok: env.items_ok,\n    items_failed: env.items_failed,\n    status: env.status,\n    notes: [env.notes, env.warnings.length ? `warnings: ${env.warnings.join(',')}` : ''].filter(Boolean).join(' | '),\n  };\n}\n\n/**\n * A workflow toggle that is OFF is a normal outcome, not an error: the run\n * ends immediately with a skipped envelope so the dashboard shows why nothing\n * happened.\n */\nfunction skipped({ workflow, correlationId, reason, started }) {\n  return { ...envelope({ workflow, correlationId, started }), ok: true, status: 'skipped', notes: reason };\n}\n\nfunction newCorrelationId(workflow) { return makeCorrelationId(workflow); }\n\n// ===== nodes/wf90-error.js =====\n\n// @requires errors schema util runtime\n//\n// WF-90 catches anything no other handler did. Its own failure would be\n// invisible, so it does the minimum possible work and never calls a model.\n\nconst trigger = $input.first().json || {};\nconst wf = trigger.workflow || {};\nconst exec = trigger.execution || {};\nconst lastNode = exec.lastNodeExecuted || '';\nconst message = (exec.error && (exec.error.message || exec.error.description)) || 'Unknown workflow failure';\n\n// Recover a typed code if the thrower embedded one (\"E-XXX-YYY: detail\").\nconst codeMatch = String(message).match(/\\b([EW]-[A-Z]+-[A-Z0-9]+)\\b/);\nconst code = codeMatch ? codeMatch[1] : 'E-UNKNOWN';\n\nconst correlationId = newCorrelationId('WF-90');\nconst now = nowIso();\n\nconst error_rows = [{\n  at: now,\n  correlation_id: correlationId,\n  applicant_id: '',\n  workflow: wf.name || 'unknown',\n  node: lastNode,\n  error_code: code,\n  error_message: String(message).slice(0, 900),\n  severity: (ERROR_CATALOGUE[code] || {}).severity || 'error',\n  retryable: String(Boolean((ERROR_CATALOGUE[code] || {}).retryable)),\n  hint: (ERROR_CATALOGUE[code] || {}).hint || 'Open the execution in n8n for the full stack trace.',\n  payload_json: safeJson({ execution_id: exec.id, execution_url: exec.url, mode: exec.mode }),\n  retry_count: 0,\n  resolved: 'FALSE',\n}];\n\nconst runlog_rows = [{\n  started_at: exec.startedAt || now,\n  correlation_id: correlationId,\n  workflow: wf.name || 'unknown',\n  trigger: exec.mode || 'unknown',\n  finished_at: now,\n  items_in: 0, items_ok: 0, items_failed: 1,\n  status: 'failed',\n  notes: `${code} at node \"${lastNode}\" — ${String(message).slice(0, 200)}`,\n}];\n\nconst severity = error_rows[0].severity;\nreturn [{ json: {\n  ok: false,\n  error_rows,\n  runlog_rows,\n  // Drives the alert branch: only fatal problems are worth interrupting someone.\n  should_alert: severity === 'fatal',\n  alert_subject: `[HR automation] ${code} in ${wf.name || 'a workflow'}`,\n  alert_body: [\n    `Workflow: ${wf.name || 'unknown'}`,\n    `Node: ${lastNode}`,\n    `Code: ${code}`,\n    `Message: ${String(message).slice(0, 500)}`,\n    `Hint: ${error_rows[0].hint}`,\n    exec.url ? `Execution: ${exec.url}` : '',\n  ].filter(Boolean).join('\\n'),\n} }];"
+      },
+      "id": "wf-90-format-error",
+      "position": [
+        480,
+        180
+      ]
+    },
+    {
+      "name": "Emit Error Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ---------------------------------------------------------------------\n\n// GENERATED FILE — do not edit inside n8n.\n\n// Source: n8n/src/nodes/emit-errors.js  +  n8n/src/lib/{}.js\n\n// Edit the source and run `npm run build:workflows`.\n\n// ---------------------------------------------------------------------\n\n// ===== nodes/emit-errors.js =====\n\n// @requires\nconst plan = $input.first();\nconst rows = (plan && plan.json && plan.json.error_rows) || [];\nreturn rows.map((json) => ({ json }));"
+      },
+      "id": "wf-90-emit-error-rows",
+      "position": [
+        740,
+        180
+      ]
+    },
+    {
+      "name": "Emit Run Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ---------------------------------------------------------------------\n\n// GENERATED FILE — do not edit inside n8n.\n\n// Source: n8n/src/nodes/emit-runlog.js  +  n8n/src/lib/{}.js\n\n// Edit the source and run `npm run build:workflows`.\n\n// ---------------------------------------------------------------------\n\n// ===== nodes/emit-runlog.js =====\n\n// @requires\nconst plan = $input.first();\nconst rows = (plan && plan.json && plan.json.runlog_rows) || [];\nreturn rows.map((json) => ({ json }));"
+      },
+      "id": "wf-90-emit-run-log",
+      "position": [
+        740,
+        360
+      ]
+    },
+    {
+      "name": "Append Errors",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Errors",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [],
+          "value": {}
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "hr-sheets-sa",
+          "name": "HR Sheets Service Account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "wf-90-append-errors",
+      "position": [
+        1000,
+        180
+      ]
+    },
+    {
+      "name": "Append Run Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "RunLog",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [],
+          "value": {}
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "hr-sheets-sa",
+          "name": "HR Sheets Service Account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "wf-90-append-run-log",
+      "position": [
+        1000,
+        360
+      ]
+    },
+    {
+      "name": "Fatal?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Fatal?-cond",
+              "leftValue": "={{ $json.should_alert }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "wf-90-fatal",
+      "position": [
+        740,
+        540
+      ]
+    },
+    {
+      "name": "Email Operator",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $env.ALERT_EMAIL }}",
+        "subject": "={{ $json.alert_subject }}",
+        "emailType": "text",
+        "message": "={{ $json.alert_body }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "hr-gmail",
+          "name": "HR Gmail"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "id": "wf-90-email-operator",
+      "position": [
+        1000,
+        540
+      ]
+    }
+  ],
+  "connections": {
+    "On any workflow error": {
+      "main": [
+        [
+          {
+            "node": "Format Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Error": {
+      "main": [
+        [
+          {
+            "node": "Emit Error Rows",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Emit Run Log",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fatal?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit Error Rows": {
+      "main": [
+        [
+          {
+            "node": "Append Errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit Run Log": {
+      "main": [
+        [
+          {
+            "node": "Append Run Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fatal?": {
+      "main": [
+        [
+          {
+            "node": "Email Operator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "tags": [
+    "hr-automation"
+  ],
+  "active": false,
+  "versionId": "wf-90-v1",
+  "meta": {
+    "instanceId": "hr-automation"
+  },
+  "pinData": {}
+}

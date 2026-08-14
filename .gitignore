@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.local
+n8n/.env
+*.log
+
+# Service-account keys are credentials. Never commit one.
+*service-account*.json
+*credentials*.json
+!.env.example
+
+.DS_Store
+.next/
+*.tsbuildinfo

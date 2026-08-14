@@ -1,0 +1,42 @@
+# Automatic HTTPS via Let's Encrypt. Caddy handles cert issue and renewal with
+# no cron job and no manual step.
+
+{
+	email {$LETSENCRYPT_EMAIL}
+}
+
+{$N8N_HOST} {
+	encode gzip
+
+	# /healthz is public so UptimeRobot can poll it without a credential.
+	handle /healthz {
+		reverse_proxy n8n:5678
+	}
+
+	handle {
+		reverse_proxy n8n:5678 {
+			# n8n needs the real scheme/host to build correct webhook URLs.
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Forwarded-Host {host}
+			# Long-poll and SSE connections in the editor must not be cut short.
+			transport http {
+				read_timeout 300s
+			}
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 10mb
+			roll_keep 3
+		}
+	}
+}
