@@ -11,11 +11,12 @@ export default async function TemplatesPage() {
     data = await readTabs(['Templates', 'JobRoles']);
   } catch (err) {
     const e = err as SheetsError;
-    return <><h1>Templates</h1><ErrorBanner error={{ code: e.code, message: e.message, hint: e.hint }} /></>;
+    return <><div className="eyebrow">Content system</div><h1>Templates</h1><ErrorBanner error={{ code: e.code, message: e.message, hint: e.hint }} /></>;
   }
 
   return (
     <>
+      <div className="eyebrow">Content system</div>
       <h1>Templates</h1>
       <p className="page-sub">
         The shell every email is built from. Most specific match wins: role + category beats

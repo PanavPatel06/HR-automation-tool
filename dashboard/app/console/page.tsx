@@ -13,7 +13,7 @@ export default async function ConsolePage() {
     data = await readTabs(['Errors', 'RunLog', 'EmailLog', 'Quota']);
   } catch (err) {
     const e = err as SheetsError;
-    return <><h1>Console</h1><ErrorBanner error={{ code: e.code, message: e.message, hint: e.hint }} /></>;
+    return <><div className="eyebrow">Diagnostics</div><h1>Console</h1><ErrorBanner error={{ code: e.code, message: e.message, hint: e.hint }} /></>;
   }
 
   const heartbeat = data.RunLog
@@ -36,6 +36,7 @@ export default async function ConsolePage() {
 
   return (
     <>
+      <div className="eyebrow">Diagnostics</div>
       <h1>Console</h1>
       <p className="page-sub">Health, errors and run history. Start here when something looks wrong.</p>
 

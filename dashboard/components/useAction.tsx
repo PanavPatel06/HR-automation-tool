@@ -14,6 +14,10 @@ export type ActionResult = {
     items_failed?: number;
     warnings?: string[];
     errors?: Array<{ applicant_id?: string; code?: string; message?: string }>;
+    // Inbox reply actions (reply-template-fill / reply-ai-draft) hand back a
+    // draft for the compose box rather than a batch summary.
+    subject?: string;
+    html?: string;
   };
 };
 

@@ -11,7 +11,7 @@ export default async function RepliesPage() {
     data = await readTabs(['Replies', 'Config']);
   } catch (err) {
     const e = err as SheetsError;
-    return <><h1>Replies</h1><ErrorBanner error={{ code: e.code, message: e.message, hint: e.hint }} /></>;
+    return <><div className="eyebrow">Inbox</div><h1>Replies</h1><ErrorBanner error={{ code: e.code, message: e.message, hint: e.hint }} /></>;
   }
 
   const config = parseConfig(data.Config);
@@ -19,6 +19,7 @@ export default async function RepliesPage() {
 
   return (
     <>
+      <div className="eyebrow">Inbox</div>
       <h1>Replies</h1>
       <p className="page-sub">
         Candidate replies, sorted with the uncertain ones first. Anything classified below{' '}

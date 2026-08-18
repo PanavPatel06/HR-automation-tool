@@ -14,6 +14,7 @@ export default async function ApplicantsPage() {
     const e = err as SheetsError;
     return (
       <>
+        <div className="eyebrow">Hiring pipeline</div>
         <h1>Applicants</h1>
         <ErrorBanner error={{ code: e.code, message: e.message, hint: e.hint }} />
       </>
@@ -40,6 +41,7 @@ export default async function ApplicantsPage() {
 
   return (
     <>
+      <div className="eyebrow">Hiring pipeline</div>
       <h1>Applicants</h1>
       <p className="page-sub">
         The pipeline, end to end. Rows arrive from the Applicants tab; everything after that happens here.

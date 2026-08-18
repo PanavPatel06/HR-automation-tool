@@ -1,47 +1,127 @@
-/* Small, deliberate design system. Theme-aware: the palette is defined on
-   :root and only the values are swapped for dark. */
+/* Small, deliberate design system, adapted from the Aave visual language in
+   DESIGN.md for a dense operational dashboard rather than a marketing page:
+   an ink-based text hierarchy (one hue, several weights) instead of a grab
+   bag of grays, a single purple accent used consistently for every
+   interactive surface, an eyebrow-over-heading structure on every page,
+   inset rounded panels, pill-shaped CTAs paired with a tinted "ghost"
+   variant instead of an outline, tinted icon badges on banners, and
+   restrained motion that backs off entirely under prefers-reduced-motion.
+   No WebGL background, no marketing copy, no branding — those don't belong
+   in a table-and-forms admin tool.
+
+   Theme-aware: every token lives on :root and only the values are swapped
+   for dark via prefers-color-scheme, so components never branch on theme. */
 
 :root {
-  --bg: #fbfbfa;
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  /* Surfaces */
+  --bg: #fafaf9;
   --panel: #ffffff;
-  --panel-2: #f5f5f4;
-  --border: #e4e4e2;
-  --border-strong: #d1d1ce;
+  --panel-2: #f4f3f1;
+  --border: #e7e5e1;
+  --border-strong: #d6d3cd;
+
+  /* Ink — one hue, two weights, rather than a second gray */
   --fg: #1c1b1a;
-  --fg-2: #57565340;
-  --fg-muted: #6b6a66;
-  --accent: #2f6f4e;
-  --accent-fg: #ffffff;
+  --fg-muted: #6b6863;
+  --fg-subtle: #9d998f;
+
+  /* Brand accent — a single purple used for every interactive surface */
+  --purple: #6d4fe0;
+  --purple-strong: #5a3fc4;
+  --purple-fg: #ffffff;
+  --purple-soft: rgba(109, 79, 224, 0.09);
+  --purple-soft-strong: rgba(109, 79, 224, 0.16);
+  --purple-ring: rgba(109, 79, 224, 0.38);
+
+  /* Status — independent of brand, so accent changes never touch these */
   --danger: #b4342a;
   --danger-bg: #fdf2f1;
-  --warn: #9a6510;
-  --warn-bg: #fdf8ee;
-  --ok: #2f6f4e;
-  --ok-bg: #f0f7f3;
-  --info-bg: #eef3f8;
-  --radius: 8px;
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  --warn: #8f5a0c;
+  --warn-bg: #fdf6e7;
+  --ok: #1f7a4d;
+  --ok-bg: #eef8f2;
+  --info-bg: #eef0fb;
+  --info-fg: #4b3fae;
+
+  --radius: 12px;
+  --radius-pill: 999px;
+
+  --shadow-panel: 0 1px 2px rgba(28, 27, 26, 0.03), 0 10px 24px -16px rgba(28, 27, 26, 0.16);
+
+  --duration: 140ms;
+  --duration-enter: 320ms;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* Dark tokens are declared twice on purpose: once behind the OS preference
+   (suppressed the moment someone explicitly picks light), and once behind an
+   explicit [data-theme="dark"] so the toggle below can force dark even when
+   the OS is set to light. Same values both places — see components/Nav.tsx
+   for the button that sets data-theme, and app/layout.tsx for the inline
+   script that applies a stored choice before first paint. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #17171a;
-    --panel: #1e1e22;
-    --panel-2: #26262b;
-    --border: #303036;
-    --border-strong: #45454d;
+  :root:not([data-theme="light"]) {
+    --bg: #131316;
+    --panel: #1b1b1f;
+    --panel-2: #232328;
+    --border: #2d2d33;
+    --border-strong: #40404a;
+
     --fg: #ecebe9;
-    --fg-muted: #9b9a97;
-    --accent: #6bbd90;
-    --accent-fg: #10231a;
-    --danger: #f08078;
+    --fg-muted: #9d9b98;
+    --fg-subtle: #67655f;
+
+    --purple: #a394ff;
+    --purple-strong: #b6a9ff;
+    --purple-fg: #17171a;
+    --purple-soft: rgba(163, 148, 255, 0.14);
+    --purple-soft-strong: rgba(163, 148, 255, 0.22);
+    --purple-ring: rgba(163, 148, 255, 0.5);
+
+    --danger: #f0847c;
     --danger-bg: #2a1a19;
-    --warn: #e0ab54;
+    --warn: #e3ab55;
     --warn-bg: #2a2318;
-    --ok: #6bbd90;
-    --ok-bg: #18251e;
-    --info-bg: #1b2430;
+    --ok: #6cc596;
+    --ok-bg: #17251d;
+    --info-bg: #1e2032;
+    --info-fg: #bcb1ee;
+
+    --shadow-panel: 0 0 0 1px rgba(255, 255, 255, 0.02) inset, 0 1px 2px rgba(0, 0, 0, 0.2);
   }
+}
+
+:root[data-theme="dark"] {
+  --bg: #131316;
+  --panel: #1b1b1f;
+  --panel-2: #232328;
+  --border: #2d2d33;
+  --border-strong: #40404a;
+
+  --fg: #ecebe9;
+  --fg-muted: #9d9b98;
+  --fg-subtle: #67655f;
+
+  --purple: #a394ff;
+  --purple-strong: #b6a9ff;
+  --purple-fg: #17171a;
+  --purple-soft: rgba(163, 148, 255, 0.14);
+  --purple-soft-strong: rgba(163, 148, 255, 0.22);
+  --purple-ring: rgba(163, 148, 255, 0.5);
+
+  --danger: #f0847c;
+  --danger-bg: #2a1a19;
+  --warn: #e3ab55;
+  --warn-bg: #2a2318;
+  --ok: #6cc596;
+  --ok-bg: #17251d;
+  --info-bg: #1e2032;
+  --info-fg: #bcb1ee;
+
+  --shadow-panel: 0 0 0 1px rgba(255, 255, 255, 0.02) inset, 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 * { box-sizing: border-box; }
@@ -50,120 +130,281 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font: 14px/1.55 var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 a { color: inherit; }
+
+::selection { background: var(--purple-soft-strong); }
+
+/* A single, consistent focus treatment everywhere — deliberately stronger
+   than the reference: DESIGN.md flags Aave's own build as under-covered on
+   focus-visible relative to hover (10 rules vs 44). */
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible,
+textarea:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--purple-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
 
 .shell { max-width: 1400px; margin: 0 auto; padding: 0 20px 64px; }
 
 /* --- nav --- */
 .nav {
-  display: flex; align-items: center; gap: 4px;
-  padding: 14px 0; margin-bottom: 20px;
+  display: flex; align-items: center; gap: 2px;
+  padding: 16px 0; margin-bottom: 24px;
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
-.nav .brand { font-weight: 650; margin-right: 16px; letter-spacing: -0.01em; }
+.nav .brand {
+  font-weight: 650; margin-right: 18px; letter-spacing: -0.015em;
+  font-size: 15px; color: var(--fg);
+}
 .nav a {
-  padding: 6px 11px; border-radius: 6px; text-decoration: none;
-  color: var(--fg-muted); font-weight: 500;
+  padding: 7px 13px; border-radius: var(--radius-pill); text-decoration: none;
+  color: var(--fg-muted); font-weight: 550; font-size: 13.5px;
+  transition: background-color var(--duration) var(--ease), color var(--duration) var(--ease);
 }
 .nav a:hover { background: var(--panel-2); color: var(--fg); }
-.nav a.active { background: var(--panel-2); color: var(--fg); }
+.nav a.active { background: var(--purple-soft); color: var(--purple); }
+.nav a.active:hover { background: var(--purple-soft-strong); }
 .nav .spacer { flex: 1; }
+
+/* Theme toggle: both icons always ship in the markup (identical on server
+   and client, so there is nothing for React to hydrate-mismatch on) and CSS
+   alone decides which one is visible, from whichever theme is actually
+   active — explicit data-theme first, OS preference otherwise. */
+.theme-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; padding: 0; margin-right: 4px;
+  border-radius: var(--radius-pill); border-color: transparent;
+  background: transparent; color: var(--fg-muted); font-size: 15px; line-height: 1;
+}
+.theme-toggle:hover:not(:disabled) { background: var(--panel-2); color: var(--fg); }
+.theme-toggle .theme-icon-dark { display: none; }
+:root[data-theme="dark"] .theme-toggle .theme-icon-light { display: none; }
+:root[data-theme="dark"] .theme-toggle .theme-icon-dark { display: inline; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .theme-toggle .theme-icon-light { display: none; }
+  :root:not([data-theme="light"]) .theme-toggle .theme-icon-dark { display: inline; }
+}
+
+/* --- eyebrow + heading: the reference puts a small tracked label over
+   every h1 ("Aave App" over "Savings for Everyone"); here it names the
+   section instead of a product. --- */
+.eyebrow {
+  display: block; font-size: 11px; font-weight: 660; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--purple); margin-bottom: 8px;
+}
 
 /* --- panels --- */
 .panel {
   background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 16px; margin-bottom: 16px;
+  border-radius: var(--radius); padding: 20px; margin-bottom: 16px;
+  box-shadow: var(--shadow-panel);
+  animation: fade-up var(--duration-enter) var(--ease) both;
 }
-.panel h2 { margin: 0 0 4px; font-size: 15px; font-weight: 620; }
-.panel .sub { color: var(--fg-muted); font-size: 13px; margin: 0 0 14px; }
+.panel h2 { margin: 0 0 4px; font-size: 15px; font-weight: 630; letter-spacing: -0.01em; }
+.panel .sub { color: var(--fg-muted); font-size: 13px; margin: 0 0 14px; max-width: 68ch; }
 
-h1 { font-size: 20px; font-weight: 650; margin: 0 0 4px; letter-spacing: -0.01em; }
-.page-sub { color: var(--fg-muted); margin: 0 0 18px; }
+h1 { font-size: 25px; font-weight: 670; margin: 0 0 6px; letter-spacing: -0.02em; line-height: 1.2; }
+h2 { font-size: 16px; font-weight: 640; letter-spacing: -0.01em; }
+h3 { font-size: 13.5px; font-weight: 630; letter-spacing: -0.005em; }
+.page-sub { color: var(--fg-muted); margin: 0 0 20px; max-width: 68ch; }
 
 /* --- tables --- */
-.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); }
+.table-wrap {
+  overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--panel); box-shadow: var(--shadow-panel);
+  animation: fade-up var(--duration-enter) var(--ease) both;
+}
+.table-wrap::-webkit-scrollbar { height: 8px; }
+.table-wrap::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--radius-pill); }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th {
-  text-align: left; font-weight: 600; font-size: 11px; letter-spacing: 0.04em;
-  text-transform: uppercase; color: var(--fg-muted);
-  padding: 9px 12px; border-bottom: 1px solid var(--border);
+  text-align: left; font-weight: 630; font-size: 10.5px; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--fg-subtle);
+  padding: 10px 12px; border-bottom: 1px solid var(--border);
   background: var(--panel-2); white-space: nowrap; position: sticky; top: 0;
 }
-td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
 tr:last-child td { border-bottom: 0; }
+tr { transition: background-color var(--duration) var(--ease); }
 tr.row-failed td { background: var(--danger-bg); }
 tr.row-blocked td { background: var(--warn-bg); }
-tr.selected td { background: var(--info-bg); }
+tr.selected td { background: var(--purple-soft); }
+tbody tr:not(.row-failed):not(.row-blocked):not(.selected):hover td { background: var(--panel-2); }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .mono { font-family: var(--mono); font-size: 12px; }
 .truncate { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* --- pills --- */
 .pill {
-  display: inline-block; padding: 2px 8px; border-radius: 20px;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.01em; white-space: nowrap;
+  display: inline-block; padding: 3px 9px; border-radius: var(--radius-pill);
+  font-size: 11px; font-weight: 630; letter-spacing: 0.01em; white-space: nowrap;
   background: var(--panel-2); color: var(--fg-muted); border: 1px solid var(--border);
 }
 .pill.ok { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
 .pill.warn { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
 .pill.danger { background: var(--danger-bg); color: var(--danger); border-color: transparent; }
-.pill.info { background: var(--info-bg); color: var(--fg); border-color: transparent; }
+.pill.info { background: var(--info-bg); color: var(--info-fg); border-color: transparent; }
 
-/* --- buttons --- */
+/* --- buttons: pill-shaped CTAs, a tinted ghost instead of an outline —
+   never a border on the filled or ghost variants, matching the reference's
+   "primary/ghost pairing, restated per theme" pattern. --- */
 button, .btn {
-  font: inherit; font-weight: 550; cursor: pointer;
-  padding: 7px 13px; border-radius: 6px;
+  font: inherit; font-weight: 580; cursor: pointer;
+  padding: 8px 16px; border-radius: var(--radius-pill);
   border: 1px solid var(--border-strong); background: var(--panel); color: var(--fg);
+  transition: background-color var(--duration) var(--ease), color var(--duration) var(--ease),
+    border-color var(--duration) var(--ease), filter var(--duration) var(--ease);
 }
 button:hover:not(:disabled) { background: var(--panel-2); }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
-button.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
-button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+button.primary { background: var(--purple); color: var(--purple-fg); border-color: transparent; }
+button.primary:hover:not(:disabled) { background: var(--purple-strong); }
 button.danger { background: var(--danger); color: #fff; border-color: transparent; }
-button.ghost { border-color: transparent; background: transparent; color: var(--fg-muted); }
-button.sm { padding: 4px 9px; font-size: 12px; }
+button.danger:hover:not(:disabled) { filter: brightness(1.08); }
+button.ghost { border-color: transparent; background: var(--purple-soft); color: var(--purple); }
+button.ghost:hover:not(:disabled) { background: var(--purple-soft-strong); }
+button.sm { padding: 5px 11px; font-size: 12px; }
 
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .toolbar .spacer { flex: 1; }
 
 input[type="text"], input[type="password"], input[type="search"], select, textarea {
-  font: inherit; padding: 7px 10px; border-radius: 6px;
+  font: inherit; padding: 8px 11px; border-radius: var(--radius);
   border: 1px solid var(--border-strong); background: var(--panel); color: var(--fg);
+  transition: border-color var(--duration) var(--ease);
 }
+input:focus-visible, select:focus-visible, textarea:focus-visible { border-color: var(--purple); }
 textarea { width: 100%; font-family: var(--mono); font-size: 12px; }
 
-/* --- banners --- */
+/* --- banners: a tinted icon badge instead of a bare glyph, so the leading
+   character (⚠ ! i ✓ from the components) reads as a designed chip rather
+   than raw text. --- */
 .banner {
-  display: flex; gap: 10px; align-items: flex-start;
-  padding: 11px 14px; border-radius: var(--radius); margin-bottom: 14px; font-size: 13px;
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 12px 15px; border-radius: var(--radius); margin-bottom: 14px; font-size: 13px;
+  animation: fade-up var(--duration-enter) var(--ease) both;
 }
 .banner.danger { background: var(--danger-bg); color: var(--danger); }
 .banner.warn { background: var(--warn-bg); color: var(--warn); }
 .banner.ok { background: var(--ok-bg); color: var(--ok); }
-.banner.info { background: var(--info-bg); }
-.banner strong { font-weight: 650; }
+.banner.info { background: var(--info-bg); color: var(--info-fg); }
+.banner strong { font-weight: 660; }
 .banner .hint { opacity: 0.85; }
+.banner > span:first-child {
+  display: flex; align-items: center; justify-content: center; flex: none;
+  width: 22px; height: 22px; margin-top: 1px; border-radius: 50%;
+  font-size: 12px; font-weight: 700; line-height: 1;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
 
 /* --- misc --- */
 .grid { display: grid; gap: 12px; }
 .grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
 .grid.cols-4 { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
-.stat { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 13px 15px; }
-.stat .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-muted); font-weight: 600; }
-.stat .value { font-size: 24px; font-weight: 620; margin-top: 3px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.stat {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow-panel);
+  animation: fade-up var(--duration-enter) var(--ease) both;
+}
+.grid .stat:nth-child(1) { animation-delay: 0ms; }
+.grid .stat:nth-child(2) { animation-delay: 35ms; }
+.grid .stat:nth-child(3) { animation-delay: 70ms; }
+.grid .stat:nth-child(4) { animation-delay: 105ms; }
+.grid .stat:nth-child(5) { animation-delay: 140ms; }
+.grid .stat:nth-child(6) { animation-delay: 175ms; }
+.stat .label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-subtle); font-weight: 630; }
+.stat .value { font-size: 27px; font-weight: 660; margin-top: 4px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 .stat .note { font-size: 12px; color: var(--fg-muted); margin-top: 2px; }
 .muted { color: var(--fg-muted); }
 .empty { padding: 36px 20px; text-align: center; color: var(--fg-muted); }
 details.hint-details summary { cursor: pointer; color: var(--fg-muted); font-size: 12px; }
 .preview {
-  border: 1px solid var(--border); border-radius: 6px; padding: 14px;
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 14px;
   background: #fff; color: #1c1b1a; max-height: 420px; overflow: auto;
 }
-.login-wrap { max-width: 340px; margin: 14vh auto; }
+
+/* --- inbox: two-pane thread view --- */
+.inbox-layout { display: grid; grid-template-columns: 300px 1fr; gap: 16px; align-items: start; }
+.inbox-list-wrap { position: sticky; top: 16px; }
+.inbox-list {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--panel); box-shadow: var(--shadow-panel);
+  max-height: 640px; overflow-y: auto;
+  animation: fade-up var(--duration-enter) var(--ease) both;
+}
+.inbox-item {
+  display: block; width: 100%; text-align: left; font: inherit;
+  padding: 10px 14px; border: 0; border-bottom: 1px solid var(--border);
+  border-radius: 0; background: transparent; color: var(--fg);
+}
+.inbox-list .inbox-item:last-child { border-bottom: 0; }
+.inbox-item:hover:not(:disabled) { background: var(--panel-2); }
+.inbox-item.active { background: var(--purple-soft); }
+.inbox-item-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.inbox-item-name { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.inbox-item-snippet { font-size: 12px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.unread-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--purple); flex: none; }
+.inbox-empty-pane { min-height: 200px; display: flex; align-items: center; justify-content: center; }
+
+.thread { margin-bottom: 16px; display: flex; flex-direction: column; gap: 10px; }
+.bubble {
+  background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow-panel);
+  animation: fade-up var(--duration-enter) var(--ease) both;
+}
+.bubble-sent { border-left-color: var(--purple); }
+.bubble-reply { border-left-color: var(--warn); }
+.bubble-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px; }
+.bubble-subject { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+.bubble .preview { max-height: 280px; }
+
+@media (max-width: 760px) {
+  .inbox-layout { grid-template-columns: 1fr; }
+  .inbox-list-wrap { position: static; }
+  .inbox-list { max-height: 320px; }
+}
+
+.login-wrap {
+  max-width: 360px; margin: 14vh auto;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 32px 28px; box-shadow: var(--shadow-panel);
+  animation: fade-up var(--duration-enter) var(--ease) both;
+}
+.login-wrap h1 { font-size: 20px; }
 .login-wrap input { width: 100%; margin: 10px 0; }
 .login-wrap button { width: 100%; }
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* --- responsive: the reference leans hardest on one breakpoint (768px);
+   this dashboard only needs a single step down, since the table itself
+   already handles overflow with horizontal scroll. --- */
+@media (max-width: 760px) {
+  .shell { padding: 0 14px 48px; }
+  .nav { padding: 12px 0; margin-bottom: 18px; }
+  .nav .brand { margin-right: 10px; font-size: 14px; }
+  .nav a { padding: 6px 10px; font-size: 12.5px; }
+  h1 { font-size: 21px; }
+  .panel, .stat { padding: 14px; }
+  .grid.cols-4 { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); }
+  th, td { padding: 8px 9px; }
+  .login-wrap { margin: 8vh auto; padding: 24px 20px; max-width: calc(100vw - 32px); }
+}
+
+/* Not "turn off the two transitions" — everything above is already this
+   restrained, so a global cutoff is enough. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
+}

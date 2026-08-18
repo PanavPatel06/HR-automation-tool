@@ -26,6 +26,7 @@ function LoginForm() {
 
   return (
     <div className="login-wrap">
+      <div className="eyebrow">Private workspace</div>
       <h1>HR Automation</h1>
       <p className="page-sub">Enter the team password to continue.</p>
       <form onSubmit={submit}>

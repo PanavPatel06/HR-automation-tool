@@ -18,7 +18,11 @@ export function shortDate(iso: string | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  // A fixed locale, not `undefined`: the server (Node's ICU default) and the
+  // browser (the visitor's locale) can otherwise pick different formats for
+  // the same Date — 24-hour vs. 12-hour is exactly what happened here — which
+  // React then flags as a hydration mismatch and re-renders the whole tree.
+  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
 /** Minutes since a timestamp; Infinity when absent, so staleness checks are simple. */
