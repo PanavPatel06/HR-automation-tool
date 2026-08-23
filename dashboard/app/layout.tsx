@@ -1,9 +1,13 @@
 import './globals.css';
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import { Inter, Newsreader } from 'next/font/google';
 import { Nav } from '../components/Nav';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' });
+// The one italic accent face — DESIGN.md's "Aave Aguzzo" role (one or two
+// words per h1, in italic, purple). Aguzzo itself is Aave's own brand asset;
+// this is a freely-licensed lookalike, loaded only for its italic weight.
+const accent = Newsreader({ subsets: ['latin'], style: ['italic'], weight: ['500'], variable: '--font-accent', display: 'swap' });
 
 export const metadata: Metadata = {
   title: 'HR Automation',
@@ -18,7 +22,7 @@ const THEME_INIT_SCRIPT = `try{var t=localStorage.getItem('hr-theme');if(t==='li
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={inter.variable} suppressHydrationWarning>
+    <html lang="en" className={`${inter.variable} ${accent.variable}`} suppressHydrationWarning>
       <body>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <div className="shell">

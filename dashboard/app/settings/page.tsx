@@ -1,4 +1,4 @@
-import { readTabs, SheetsError } from '../../lib/sheets';
+import { readTab, SheetsError } from '../../lib/sheets';
 import { SettingsPanel } from '../../components/SettingsPanel';
 import { ErrorBanner } from '../../components/Pills';
 
@@ -6,9 +6,9 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export default async function SettingsPage() {
-  let data;
+  let config;
   try {
-    data = await readTabs(['Config', 'RunLog']);
+    config = await readTab('Config');
   } catch (err) {
     const e = err as SheetsError;
     return <><div className="eyebrow">Configuration</div><h1>Settings</h1><ErrorBanner error={{ code: e.code, message: e.message, hint: e.hint }} /></>;
@@ -18,11 +18,8 @@ export default async function SettingsPage() {
     <>
       <div className="eyebrow">Configuration</div>
       <h1>Settings</h1>
-      <p className="page-sub">Switch each automation on or off, and see when it last ran.</p>
-      <SettingsPanel
-        config={data.Config}
-        runs={data.RunLog.map((r) => ({ workflow: r.workflow, finished_at: r.finished_at, status: r.status, notes: r.notes }))}
-      />
+      <p className="page-sub">Switch each bulk action on or off.</p>
+      <SettingsPanel config={config} />
     </>
   );
 }

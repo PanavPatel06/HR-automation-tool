@@ -1,6 +1,9 @@
 'use client';
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+// Type-only: erased at compile time (isolatedModules), so lib/gmail.ts's
+// `server-only` import never ends up in this client bundle.
+import type { GmailMessage } from '../lib/gmail';
 
 export type ActionResult = {
   ok: boolean;
@@ -18,6 +21,10 @@ export type ActionResult = {
     // draft for the compose box rather than a batch summary.
     subject?: string;
     html?: string;
+    // gmail-sync hands back the applicant's real thread.
+    messages?: GmailMessage[];
+    // start-conversation hands back the id of the (new or existing) applicant.
+    applicant_id?: string;
   };
 };
 
@@ -42,7 +49,7 @@ export function useAction() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, ...payload }),
       });
-      const json: ActionResult = await res.json().catch(() => ({ ok: false, message: 'n8n returned a response that was not JSON.' }));
+      const json: ActionResult = await res.json().catch(() => ({ ok: false, message: 'The server returned a response that was not JSON.' }));
       setResult(json);
       if (json.ok) router.refresh();
       return json;

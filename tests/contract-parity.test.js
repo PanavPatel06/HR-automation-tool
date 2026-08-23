@@ -1,7 +1,7 @@
 'use strict';
 /**
- * The dashboard deploys from `dashboard/` alone and cannot import the n8n
- * library, so `dashboard/lib/contract.ts` duplicates the column contract.
+ * The dashboard deploys from `dashboard/` alone and cannot import outside it,
+ * so `dashboard/lib/contract.ts` duplicates lib/schema.js's column contract.
  *
  * Duplication is only safe if it cannot drift silently. This test is what makes
  * it safe: if a column is added on one side and not the other, the build fails
@@ -13,8 +13,7 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 
-const { TABS, columnsFor, V1_TABS, STAGE, TRANSITIONS } = require('../n8n/src/lib/schema');
-const { CONFIG_DEFAULTS } = require('../n8n/src/lib/schema');
+const { TABS, columnsFor, V1_TABS, STAGE, TRANSITIONS, CONFIG_DEFAULTS } = require('../lib/schema');
 
 const CONTRACT_TS = readFileSync(join(__dirname, '..', 'dashboard', 'lib', 'contract.ts'), 'utf8');
 
@@ -26,14 +25,14 @@ function tabColumnsFromTs(tab) {
   return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
 }
 
-test('every V1 tab in the dashboard contract matches the n8n schema exactly', () => {
+test('every V1 tab in the dashboard contract matches lib/schema.js exactly', () => {
   for (const tab of V1_TABS) {
     const fromTs = tabColumnsFromTs(tab);
     assert.ok(fromTs, `dashboard/lib/contract.ts is missing the "${tab}" tab`);
     assert.deepEqual(
       fromTs,
       columnsFor(tab),
-      `Column drift on "${tab}". Update dashboard/lib/contract.ts and n8n/src/lib/schema.js together.`,
+      `Column drift on "${tab}". Update dashboard/lib/contract.ts and lib/schema.js together.`,
     );
   }
 });
@@ -47,7 +46,7 @@ test('the dashboard declares every V1 tab and no V2 ones', () => {
   assert.ok(!declared.includes('Analysis'), 'Analysis is a V2 tab and must not appear in the V1 dashboard');
 });
 
-test('the dashboard stage list matches the n8n stage machine', () => {
+test('the dashboard stage list matches the stage machine in lib/schema.js', () => {
   const m = CONTRACT_TS.match(/export const STAGES = \[([\s\S]*?)\] as const/);
   assert.ok(m, 'STAGES not found in the dashboard contract');
   const dashboardStages = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
@@ -56,11 +55,11 @@ test('the dashboard stage list matches the n8n stage machine', () => {
   const v1Stages = ['NEW', 'DRAFTED', 'APPROVED', 'SENT', 'REPLIED', 'CLOSED', 'FAILED'];
   assert.deepEqual(dashboardStages, v1Stages);
   for (const s of dashboardStages) {
-    assert.ok(Object.values(STAGE).includes(s), `dashboard stage "${s}" is not in the n8n stage machine`);
+    assert.ok(Object.values(STAGE).includes(s), `dashboard stage "${s}" is not in the lib/schema.js stage machine`);
   }
 });
 
-test('dashboard bulk actions only permit stages the n8n machine allows', () => {
+test('dashboard bulk actions only permit stages the stage machine allows', () => {
   const m = CONTRACT_TS.match(/export const ACTIONABLE[\s\S]*?\n\};/);
   assert.ok(m, 'ACTIONABLE not found in the dashboard contract');
 
@@ -73,20 +72,20 @@ test('dashboard bulk actions only permit stages the n8n machine allows', () => {
   const sendLine = m[0].match(/send:\s*\[([^\]]*)\]/);
   const sendStages = [...(sendLine ? sendLine[1] : '').matchAll(/'([^']+)'/g)].map((x) => x[1]);
   for (const s of sendStages) {
-    assert.ok(TRANSITIONS[s]?.includes('SENT'), `dashboard offers "send" from stage ${s}, which n8n would refuse`);
+    assert.ok(TRANSITIONS[s]?.includes('SENT'), `dashboard offers "send" from stage ${s}, which the stage machine would refuse`);
   }
 });
 
 test('every toggle the dashboard shows exists as a Config default', () => {
   const keys = [...CONTRACT_TS.matchAll(/key:\s*'(toggle_\w+)'/g)].map((m) => m[1]);
-  assert.ok(keys.length >= 5, 'expected at least the five workflow toggles');
+  assert.ok(keys.length >= 2, 'expected at least the two bulk-action toggles');
   const known = new Set(CONFIG_DEFAULTS.map((d) => d.key));
   for (const k of keys) {
     assert.ok(known.has(k), `dashboard toggle "${k}" has no Config default — bootstrap would never create it`);
   }
 });
 
-test('the n8n schema has no duplicate column names within a tab', () => {
+test('lib/schema.js has no duplicate column names within a tab', () => {
   for (const tab of Object.keys(TABS)) {
     const cols = columnsFor(tab, { includeV2: true });
     assert.equal(new Set(cols).size, cols.length, `duplicate column in "${tab}"`);

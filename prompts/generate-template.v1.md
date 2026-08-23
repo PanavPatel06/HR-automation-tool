@@ -1,7 +1,8 @@
 # generate-template.v1
 
-Used by **WF-02b Template Generation** when HR asks for a template instead of
-uploading one. Source of truth: `n8n/src/nodes/wf02b-template.js`.
+Used by the **template-generate** action when HR asks for a template instead
+of uploading one. Source of truth: the `template-generate` branch of
+`dashboard/app/api/action/route.ts`.
 
 ## System
 
@@ -30,14 +31,11 @@ Rules:
 - "name" is a short human label for this template, max 40 characters.
 ```
 
-## Validation
-
-The schema check rejects the response if the HTML fails `validateHtml()`
-(unclosed tags, `<script>`, `<iframe>`, inline event handlers) or if it invents
-a merge field outside the allowlist — an invented `{{interview_date}}` would
-make every future send fail with `E-MAIL-TEMPLATE`.
-
 ## Safety
 
-Generated templates are saved with `is_active = FALSE`. A human previews and
-activates them. Nothing a model wrote can reach a candidate without that step.
+Generated templates are saved with `is_active = FALSE` — nothing runs an
+automatic HTML/merge-field check on generation. A human previews the
+template on the Templates page and activates it explicitly. If it does
+invent a merge field outside the allowlist, that surfaces the first time
+someone drafts or sends with it: `renderEmail()` (`dashboard/lib/template.ts`)
+fails closed with `E-MAIL-TEMPLATE` rather than sending a broken email.

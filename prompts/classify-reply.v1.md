@@ -1,7 +1,11 @@
 # classify-reply.v1
 
-Used by **WF-04 Reply Watcher**. Source of truth: `buildReplyPrompt()` and
-`checkReplySchema()` in `n8n/src/lib/pipeline.js`.
+**Not currently wired up.** This was the prompt for an automated reply
+classifier that polled the mailbox on a schedule; that background job isn't
+part of the current architecture — see [Known limitations](../README.md#known-limitations).
+Today a reply is read by a human in the Inbox, unclassified. Kept here as the
+design for whenever automatic classification comes back as an explicit
+action (e.g. a "Classify" button, run per-thread on demand).
 
 ## System
 

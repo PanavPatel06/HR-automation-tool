@@ -1,5 +1,3 @@
-import { minutesSince, timeAgo } from '../lib/format';
-
 const STAGE_TONE: Record<string, string> = {
   NEW: '', DRAFTED: 'info', APPROVED: 'warn', SENT: 'ok',
   REPLIED: 'ok', CLOSED: '', FAILED: 'danger',
@@ -24,26 +22,21 @@ export function SeverityPill({ severity }: { severity: string }) {
   return <span className={`pill ${tone}`}>{severity || 'error'}</span>;
 }
 
-/**
- * n8n going silent produces no errors — nothing runs, so nothing fails. The
- * heartbeat is the only way to see it, so a stale one is shown loudly.
- */
-export function HeartbeatBanner({ lastSeen }: { lastSeen: string | undefined }) {
-  const mins = minutesSince(lastSeen);
-  if (mins <= 25) return null;
-  return (
-    <div className="banner danger">
-      <span>⚠</span>
-      <div>
-        <strong>n8n has not checked in {lastSeen ? timeAgo(lastSeen) : 'ever'}.</strong>
-        <div className="hint">
-          WF-91 Heartbeat writes to RunLog every 10 minutes. If it has stopped, no workflow is
-          running — the pipeline is silently stalled. Check the container is up and that WF-91 is
-          active.
-        </div>
-      </div>
-    </div>
-  );
+// Categories are open-ended (Config's `categories` key — Intern/Junior/Mid/
+// Senior/Lead by default, but a real deployment can rename these), so there's
+// no fixed name->tone map like STAGE_TONE. A hash picks a consistent tone per
+// name instead, so the same category always renders the same colour without
+// hardcoding what the categories are.
+const PILL_TONES = ['', 'info', 'ok', 'warn', 'danger'];
+function hashTone(s: string): string {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return PILL_TONES[h % PILL_TONES.length];
+}
+
+export function CategoryPill({ category }: { category: string }) {
+  if (!category) return null;
+  return <span className={`pill ${hashTone(category)}`}>{category}</span>;
 }
 
 export function ErrorBanner({ error }: { error: { code?: string; message: string; hint?: string } }) {

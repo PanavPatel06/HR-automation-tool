@@ -25,13 +25,6 @@ export function shortDate(iso: string | undefined): string {
   return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
-/** Minutes since a timestamp; Infinity when absent, so staleness checks are simple. */
-export function minutesSince(iso: string | undefined): number {
-  if (!iso) return Infinity;
-  const t = new Date(iso).getTime();
-  return Number.isNaN(t) ? Infinity : (Date.now() - t) / 60000;
-}
-
 export function pluralise(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }

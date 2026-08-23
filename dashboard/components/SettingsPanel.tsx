@@ -2,27 +2,21 @@
 import type { Row } from '../lib/contract';
 import { TOGGLES } from '../lib/contract';
 import { useAction, ResultBanner } from './useAction';
-import { timeAgo } from '../lib/format';
-
-type RunSummary = { workflow: string; finished_at: string; status: string; notes: string };
 
 /**
- * The function toggles from the project goal: one switch per automation, each
- * showing whether it is on and when it last did anything.
+ * The function toggles from the project goal: one switch per bulk action.
  *
- * The switches write to the Config tab; every workflow reads its own toggle as
- * its first step and no-ops when it is off. That means a toggle takes effect
- * immediately without redeploying anything, and it works even if this dashboard
- * is down — HR can flip the cell in the sheet.
+ * The switches write to the Config tab; the Draft and Send actions in
+ * app/api/action/route.ts check their own toggle first and refuse to run
+ * when it is off. That means a toggle takes effect immediately without
+ * redeploying anything, and it works even if this dashboard is down — HR
+ * can flip the cell in the sheet.
  */
-export function SettingsPanel({ config, runs }: { config: Row[]; runs: RunSummary[] }) {
+export function SettingsPanel({ config }: { config: Row[] }) {
   const { run, busy, result, clear } = useAction();
   const byKey = Object.fromEntries(config.map((r) => [r.key, r]));
 
   const isOn = (key: string) => ['true', 'yes', '1', 'on'].includes(String(byKey[key]?.value ?? '').toLowerCase());
-  const lastRun = (workflow: string) => runs
-    .filter((r) => r.workflow.startsWith(workflow))
-    .sort((a, b) => b.finished_at.localeCompare(a.finished_at))[0];
 
   const dryRun = isOn('dry_run');
 
@@ -56,32 +50,18 @@ export function SettingsPanel({ config, runs }: { config: Row[]; runs: RunSummar
       </div>
 
       <div className="panel">
-        <h2>Automations</h2>
-        <p className="sub">
-          Each switch writes to the Config tab. Workflows check their own toggle first and stop
-          immediately when it is off — so turning something off takes effect on the next run,
-          with no redeploy.
-        </p>
+        <h2>Bulk actions</h2>
+        <p className="sub">Each switch writes to the Config tab and takes effect on the next Draft or Send click.</p>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Function</th><th>Workflow</th><th>What it does</th><th>Last run</th><th style={{ width: 110 }}>State</th></tr></thead>
+            <thead><tr><th>Function</th><th>What it does</th><th style={{ width: 110 }}>State</th></tr></thead>
             <tbody>
               {TOGGLES.map((t) => {
                 const on = isOn(t.key);
-                const last = lastRun(t.workflow);
                 return (
                   <tr key={t.key}>
                     <td style={{ fontWeight: 550 }}>{t.label}</td>
-                    <td className="mono muted">{t.workflow}</td>
                     <td className="muted" style={{ maxWidth: 380 }}>{t.description}</td>
-                    <td className="muted">
-                      {last ? (
-                        <>
-                          {timeAgo(last.finished_at)}
-                          <div><span className={`pill ${last.status === 'ok' ? 'ok' : last.status === 'failed' ? 'danger' : ''}`}>{last.status}</span></div>
-                        </>
-                      ) : <span className="muted">never</span>}
-                    </td>
                     <td>
                       <button
                         className={on ? '' : 'primary'}

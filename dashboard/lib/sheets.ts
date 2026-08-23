@@ -71,8 +71,8 @@ function mapError(err: unknown, what: string): SheetsError {
 //
 // Seeded lazily on first access (not at module load) so its relative
 // timestamps — "4 minutes ago", "this morning" — stay fresh no matter when
-// the dev server was started. Config values mirror n8n/src/lib/schema.js's
-// real CONFIG_DEFAULTS rather than inventing settings that don't exist.
+// the dev server was started. Config values mirror ../lib/schema.js's real
+// CONFIG_DEFAULTS rather than inventing settings that don't exist.
 
 let demoStore: Record<TabName, Row[]> | null = null;
 
@@ -126,17 +126,15 @@ function buildDemoStore(): Record<TabName, Row[]> {
     ]); })(),
 
     RunLog: (() => { n = 0; return rows('RunLog', [
-      { started_at: ago(4 * MIN), correlation_id: 'run-demo-heartbeat', workflow: 'WF-91 Heartbeat', trigger: 'schedule', finished_at: ago(4 * MIN), items_in: '0', items_ok: '0', items_failed: '0', status: 'ok', notes: 'n8n is alive' },
-      { started_at: ago(20 * HOUR), correlation_id: 'run-demo-draft-1', workflow: 'WF-02 Draft generation', trigger: 'schedule', finished_at: ago(20 * HOUR), items_in: '2', items_ok: '2', items_failed: '0', status: 'ok', notes: '2 drafted' },
-      { started_at: ago(2 * DAY), correlation_id: 'run-demo-send-1', workflow: 'WF-03 Send', trigger: 'dashboard', finished_at: ago(2 * DAY), items_in: '1', items_ok: '1', items_failed: '0', status: 'ok', notes: '1 sent' },
-      { started_at: ago(7 * DAY), correlation_id: 'run-demo-draft-9', workflow: 'WF-02 Draft generation', trigger: 'schedule', finished_at: ago(7 * DAY), items_in: '3', items_ok: '2', items_failed: '1', status: 'partial', notes: '1 of 3 drafts failed — model returned empty content' },
-      { started_at: ago(7 * DAY + 2 * HOUR), correlation_id: 'run-demo-followup', workflow: 'WF-05 Follow-up flagging', trigger: 'schedule', finished_at: ago(7 * DAY + 2 * HOUR), items_in: '0', items_ok: '0', items_failed: '0', status: 'skipped', notes: 'toggle_followup is off' },
+      { started_at: ago(20 * HOUR), correlation_id: 'run-demo-draft-1', workflow: 'Draft', trigger: 'dashboard', finished_at: ago(20 * HOUR), items_in: '2', items_ok: '2', items_failed: '0', status: 'ok', notes: '2 drafted' },
+      { started_at: ago(2 * DAY), correlation_id: 'run-demo-send-1', workflow: 'Send', trigger: 'dashboard', finished_at: ago(2 * DAY), items_in: '1', items_ok: '1', items_failed: '0', status: 'ok', notes: '1 sent' },
+      { started_at: ago(7 * DAY), correlation_id: 'run-demo-draft-9', workflow: 'Draft', trigger: 'dashboard', finished_at: ago(7 * DAY), items_in: '3', items_ok: '2', items_failed: '1', status: 'partial', notes: '1 of 3 drafts failed — model returned empty content' },
     ]); })(),
 
     Errors: (() => { n = 0; return rows('Errors', [
-      { at: ago(7 * DAY), correlation_id: 'run-demo-draft-9', applicant_id: 'APP-1007', workflow: 'WF-02 Draft generation', node: 'Generate draft', error_code: 'E-LLM-EMPTY', error_message: 'Model returned an empty draft after 3 retries', severity: 'error', retryable: 'true', hint: 'Usually transient. Re-run the batch; escalate if it repeats for the same applicant.', resolved: '' },
-      { at: ago(30 * MIN), correlation_id: 'run-demo-intake', applicant_id: 'APP-1006', workflow: 'WF-01 Intake', node: 'Validate row', error_code: 'E-VALIDATION', error_message: 'email does not look like a valid address', severity: 'warn', retryable: 'false', hint: 'Fix the email in the Applicants tab and re-run intake.', resolved: '' },
-      { at: ago(9 * DAY), correlation_id: 'run-demo-send-old', applicant_id: 'APP-1007', workflow: 'WF-03 Send', node: 'Send mail', error_code: 'E-GMAIL-BOUNCE', error_message: 'Recipient address rejected', severity: 'error', retryable: 'false', hint: 'Confirm the address with the candidate before retrying.', resolved: 'TRUE' },
+      { at: ago(7 * DAY), correlation_id: 'run-demo-draft-9', applicant_id: 'APP-1007', workflow: 'Draft', node: 'Groq', error_code: 'E-LLM-EMPTY', error_message: 'Model returned an empty draft', severity: 'error', retryable: 'true', hint: 'Usually transient. Click Draft again; escalate if it repeats for the same applicant.', resolved: '' },
+      { at: ago(30 * MIN), correlation_id: 'run-demo-intake', applicant_id: 'APP-1006', workflow: 'Intake', node: 'Validate row', error_code: 'E-VALIDATION', error_message: 'email does not look like a valid address', severity: 'warn', retryable: 'false', hint: 'Fix the email in the Applicants tab.', resolved: '' },
+      { at: ago(9 * DAY), correlation_id: 'run-demo-send-old', applicant_id: 'APP-1007', workflow: 'Send', node: 'Gmail', error_code: 'E-GMAIL-BOUNCE', error_message: 'Recipient address rejected', severity: 'error', retryable: 'false', hint: 'Confirm the address with the candidate before retrying.', resolved: 'TRUE' },
     ]); })(),
 
     Quota: (() => { n = 0; return rows('Quota', [
@@ -169,23 +167,6 @@ function buildDemoStore(): Record<TabName, Row[]> {
 function demoDb(): Record<TabName, Row[]> {
   if (!demoStore) demoStore = buildDemoStore();
   return demoStore;
-}
-
-/**
- * Demo-mode only: append a new row to a tab's in-memory store. There is no
- * real-mode equivalent here — a real deployment creates rows via n8n, which
- * owns the Sheets write path for anything beyond the dashboard's own pure
- * state changes (see app/api/action/route.ts). Callers must check
- * isDemoMode() first; this throws otherwise so a bug can't silently create
- * an untracked row nobody can find in the sheet.
- */
-export function appendDemoRow(tab: TabName, fields: Record<string, string>): Row {
-  if (!isDemoMode()) throw new SheetsError('E-UNKNOWN', 'appendDemoRow was called outside demo mode.', 'This is a bug — it should only run when isDemoMode() is true.');
-  const db = demoDb()[tab];
-  const nextRow = (db.at(-1)?._row ?? 1) + 1;
-  const row = { ...blankRow(tab), ...fields, _row: nextRow } as unknown as Row;
-  db.push(row);
-  return row;
 }
 
 // --- reads / writes ----------------------------------------------------------
@@ -234,7 +215,8 @@ export type Patch = { _row: number; [column: string]: string | number };
 
 /**
  * Patch specific cells on specific rows. Only the named columns are written, so
- * a concurrent n8n write to a different column is never clobbered.
+ * a concurrent write to a different column (e.g. from someone editing the
+ * sheet directly) is never clobbered.
  */
 export async function patchRows(tab: TabName, patches: Patch[]): Promise<number> {
   if (!patches.length) return 0;
@@ -283,6 +265,44 @@ export async function patchRows(tab: TabName, patches: Patch[]): Promise<number>
   return patches.length;
 }
 
+/**
+ * Append a brand-new row to a tab — real Sheets `values.append` in real mode,
+ * an in-memory push in demo mode. Unlike patchRows, this creates a row rather
+ * than editing one: an AI-generated template, an EmailLog entry, or a
+ * manually started Inbox conversation. Bulk applicant intake still happens
+ * by adding rows to the sheet directly (by hand or via a Google Form) — see
+ * README.md#known-limitations.
+ */
+export async function appendRow(tab: TabName, fields: Record<string, string>): Promise<Row> {
+  const headers = TABS[tab] as readonly string[];
+  for (const key of Object.keys(fields)) {
+    if (!headers.includes(key)) throw new SheetsError('E-SHEET-SCHEMA', `Cannot write unknown column "${key}" on "${tab}".`, 'This is a bug — the column is not in the contract.');
+  }
+
+  if (isDemoMode()) {
+    const db = demoDb()[tab];
+    const nextRow = (db.at(-1)?._row ?? 1) + 1;
+    const row = { ...blankRow(tab), ...fields, _row: nextRow } as unknown as Row;
+    db.push(row);
+    return row;
+  }
+
+  try {
+    const api = await client();
+    const res = await api.spreadsheets.values.append({
+      spreadsheetId: sheetId(),
+      range: `${tab}!A:A`,
+      valueInputOption: 'USER_ENTERED',
+      insertDataOption: 'INSERT_ROWS',
+      requestBody: { values: [headers.map((h) => fields[h] ?? '')] },
+    });
+    const rowNum = Number(res.data.updates?.updatedRange?.match(/(\d+)(?::|$)/)?.[1]) || 0;
+    return { ...blankRow(tab), ...fields, _row: rowNum } as unknown as Row;
+  } catch (err) {
+    throw mapError(err, `appending a row to "${tab}"`);
+  }
+}
+
 /** Set a Config key. Used by the toggle switches. */
 export async function setConfig(key: string, value: string): Promise<void> {
   const rows = await readTab('Config');
@@ -291,7 +311,7 @@ export async function setConfig(key: string, value: string): Promise<void> {
   await patchRows('Config', [{ _row: row._row, value, updated_at: new Date().toISOString() }]);
 }
 
-/** Config rows as a typed object, matching parseConfig() in the n8n library. */
+/** Config rows as a typed object, matching parseConfig() in ../lib/schema.js's callers. */
 export function parseConfig(rows: Row[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const r of rows) {

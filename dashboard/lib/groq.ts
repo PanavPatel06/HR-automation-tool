@@ -1,13 +1,11 @@
 import 'server-only';
 
 /**
- * A direct Groq call, used only as the demo-mode stand-in for n8n's AI
- * router (n8n/src/lib/ai-router.js). In the real architecture the dashboard
- * never talks to a model provider — every AI call goes through n8n so
- * secrets and rate limits live in one place (see lib/n8n.ts). This exists so
- * "Generate a template" still works with zero n8n setup, for someone who has
- * only a Groq key and no Google Sheet: see isDemoMode() in lib/sheets.ts for
- * the gate that keeps it out of the real path entirely.
+ * A direct Groq call — the dashboard's only model provider. Every AI action
+ * (draft generation, template generation, AI-assisted replies) goes through
+ * this one function. No failover provider and no quota tracking: a single
+ * free-tier key is enough for V1's volume, and Groq returns a plain 429 if
+ * it isn't — add a fallback provider here if that ever bites.
  */
 
 export class GroqError extends Error {

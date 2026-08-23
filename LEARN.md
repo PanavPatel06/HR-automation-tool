@@ -1,12 +1,25 @@
 # Learning this codebase — a path from basic Python
 
+> **Stale since 2026-08-23.** This was written when the backend was a
+> separate n8n instance under `n8n/src/lib/` and `n8n/src/nodes/` — that
+> directory no longer exists. Every side effect it taught through (drafting,
+> sending, templates, the AI router) now lives as plain TypeScript in
+> `dashboard/lib/` instead: `dashboard/lib/draft.ts`, `dashboard/lib/groq.ts`,
+> `dashboard/lib/gmail.ts`, `dashboard/lib/template.ts`. The JavaScript/async
+> concepts below (Parts 0-2, 5) are unaffected — only the file paths and
+> code excerpts in Parts 3-4 point at files that moved or were simplified
+> away (no more Groq→Gemini failover, no quota ledger). Treat this as a
+> guide that needs its examples re-cut against the current `dashboard/lib/`
+> files rather than a ready-to-follow path; ask for that re-cut explicitly
+> if you want it done properly, section by section, rather than skimmed.
+
 You know Python syntax, loops and functions. This project is JavaScript. This
 document gets you from there to confidently changing and extending it.
 
 **It is not a JavaScript tutorial.** Every concept here is taught with real code
 from *this repo*, in the order you will actually meet it. Generic tutorials give
-you generic knowledge; you need to be able to read [`n8n/src/lib/pipeline.js`](n8n/src/lib/pipeline.js)
-by the end of the month, and that is what this is aimed at.
+you generic knowledge; you need to be able to read this codebase fluently, and
+that is what this is aimed at.
 
 ## How to use it
 

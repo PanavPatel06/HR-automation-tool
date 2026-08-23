@@ -2,14 +2,13 @@
   "name": "hr-automation",
   "version": "1.0.0",
   "private": true,
-  "description": "HR hiring automation — n8n workflows + Google Sheets + a Next.js control dashboard.",
+  "description": "HR hiring automation — Google Sheets + a Next.js dashboard, no separate backend.",
   "scripts": {
     "test": "node --test \"tests/**/*.test.js\"",
-    "build:workflows": "node scripts/build-workflows.mjs",
-    "check:workflows": "node scripts/build-workflows.mjs --check",
     "bootstrap:sheets": "node scripts/bootstrap-sheets.mjs",
     "seed:demo": "node scripts/bootstrap-sheets.mjs --seed-demo",
-    "verify": "npm run test && npm run check:workflows"
+    "gmail:oauth": "node scripts/gmail-oauth.mjs",
+    "verify": "npm run test"
   },
   "engines": {
     "node": ">=20"

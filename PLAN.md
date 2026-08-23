@@ -4,28 +4,39 @@
 > edited as decisions land. Anything marked **[DECIDE]** needs a human answer
 > before the milestone that depends on it starts.
 
+> **2026-08-23 — n8n removed.** §1, §3, §4, §5 and §7-8 below describe the
+> original design, where a separate n8n instance held every side effect and
+> the dashboard only sent it signed webhooks. That instance was never
+> actually run in production, and every side effect it owned (drafting,
+> sending, template generation, preflight) has since been reimplemented as a
+> direct, in-process dashboard action — see [docs/architecture.md](docs/architecture.md)
+> for the current design. Sections below are kept as the historical record
+> and as a source of ideas for V2 (the scoring/queue/quota design in particular
+> still applies conceptually — it would just run as dashboard actions instead
+> of n8n workflows), but treat any mention of n8n, webhooks, or a workflow
+> engine as **not what's currently deployed.**
+
 ---
 
-## Status — 2026-08-14
+## Status — 2026-08-23
 
-**V1 is built.** 105 tests passing, 9 workflows generated and structurally
-validated, dashboard typechecks and builds. See [README.md](README.md) to run it.
+**V1 is built and running without n8n.** Drafting, sending, template
+generation and preflight all run in-process in the dashboard (Groq + Gmail
+called directly). See [README.md](README.md) to run it.
 
 | Milestone | State | Notes |
 |---|---|---|
-| M0 Foundations | **built** | `docker-compose.yml` + Caddy, `bootstrap-sheets.mjs`, README |
-| M1 Intake | **built** | WF-01, validation library, blocked-row handling |
-| M2 Templates + drafting | **built** | WF-02 / WF-02b, AI router with Groq→Gemini failover |
-| M3 Sending | **built** | WF-03, dry run, daily cap, per-recipient isolation |
-| M4 Replies | **built** | WF-04, thread matching, confidence floor |
-| M5 Console + hardening | **built** | WF-00/90/91, error catalogue, dashboard Console |
+| M0 Foundations | **built** | `bootstrap-sheets.mjs`, README, deploys to Render or Vercel |
+| M1 Intake | **manual** | No automated validation/normalisation step — rows are added to the sheet already in shape. See [Known limitations](README.md#known-limitations). |
+| M2 Templates + drafting | **built** | Direct Groq call from the dashboard's Draft action, no failover provider |
+| M3 Sending | **built** | Direct Gmail call from the dashboard's Send action, dry run, daily cap, per-recipient isolation |
+| M4 Replies | **manual** | Inbox shows a candidate's thread on demand; no automated classification |
+| M5 Console + hardening | **built** | Preflight, error catalogue, dashboard Console |
 
-**Not yet done — needs a live n8n instance:** the acceptance criteria in §5 are
-end-to-end runtime checks. The library and generated node bodies are covered by
-tests and the graphs are validated structurally, but node *parameter* shapes
-(Google Sheets / Gmail node options) are written against the documented schema
-and have not been executed. WF-00 Preflight and the fault-injection table in
-[docs/runbook.md](docs/runbook.md) exist to close that gap on first deploy.
+**Superseded:** the "needs a live n8n instance" gap noted in the previous
+status update no longer applies — there is no n8n instance to run. The
+dashboard's own action routes are what execute, and they're exercised
+directly (see the Quick start in [README.md](README.md)).
 
 ### Who is building V2
 
@@ -47,7 +58,7 @@ because they need no new language concepts.
 | 3 | Gmail via OAuth on the HR mailbox | Replies land in the same inbox, so reply tracking is free |
 | — | **Dashboard auth is a shared team password, not per-user Google sign-in** | *Deviation from §5.* Zero dependencies and no OAuth app to register, so the dashboard runs immediately. Cost: `approved_by` records `dashboard`, not a person. Upgrade path documented in [dashboard/README.md](dashboard/README.md). |
 | — | Templates opt into AI with `{{ai_body}}` | Not in the original plan. Makes the token cost of personalisation an explicit per-template choice, which matters because TPD is the binding constraint (§7) |
-| — | Workflow logic bundled from tested modules | n8n Code nodes cannot `require` local files; without this, all logic would be untestable strings inside JSON |
+| — | **n8n removed; every side effect moved in-process into the dashboard** | *Deviation from §1/§3.* Every action in V1 is triggered by a person clicking a button — there's no scheduled or unattended work — so the split between "trigger" (dashboard) and "does the side effect" (a separately hosted workflow engine, connected by a signed webhook) was pure overhead with nothing running on the other end of it. Cost: no automated intake normalisation, no scheduled reply polling, no Groq→Gemini failover, no persisted quota ledger — all four are documented in [Known limitations](README.md#known-limitations) and can come back as explicit dashboard actions if volume ever demands it. |
 
 ---
 

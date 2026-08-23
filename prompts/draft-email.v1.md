@@ -1,9 +1,9 @@
 # draft-email.v1
 
-Used by **WF-02 Draft Generation** for every applicant whose template contains
+Used by the **Draft** action for every applicant whose template contains
 `{{ai_body}}`. Templates without that field never reach a model.
 
-Source of truth: `buildDraftPrompt()` in `n8n/src/lib/pipeline.js`. This file
+Source of truth: `buildDraftPrompt()` in `dashboard/lib/draft.ts`. This file
 documents intent; the code is what runs. Bump the version in both when the
 wording changes materially, so `prompt_version` stays meaningful.
 
@@ -47,6 +47,6 @@ Rules for body_html:
 
 `checkDraftSchema()` rejects a response — before it can reach a template — that
 has no subject or body, contains `{{` or `}}`, contains `<script>`/`<iframe>`/
-`<style>`, or exceeds 20,000 characters. On rejection the router retries once
-with a repair prompt, then fails over to the next model, then records
-`E-LLM-SCHEMA` against that applicant only.
+`<style>`, or exceeds 20,000 characters. On rejection that one applicant is
+marked `FAILED` with `E-LLM-SCHEMA`; the rest of the batch is unaffected —
+click Draft again for just that applicant to retry.

@@ -1,9 +1,9 @@
 /**
  * The sheet contract, mirrored for the dashboard.
  *
- * This duplicates n8n/src/lib/schema.js on purpose: the dashboard deploys to
- * Vercel from the `dashboard/` directory alone and cannot import from outside
- * it. `tests/contract-parity.test.js` at the repo root fails the build if the
+ * This duplicates lib/schema.js on purpose: the dashboard deploys to Vercel
+ * from the `dashboard/` directory alone and cannot import from outside it.
+ * `tests/contract-parity.test.js` at the repo root fails the build if the
  * two ever disagree, so the duplication cannot rot silently.
  */
 
@@ -32,7 +32,7 @@ export type Row = Record<string, string> & { _row: number };
 export const STAGES = ['NEW', 'DRAFTED', 'APPROVED', 'SENT', 'REPLIED', 'CLOSED', 'FAILED'] as const;
 export type Stage = (typeof STAGES)[number];
 
-/** Which stage a bulk action can legally act on — mirrors the n8n stage machine. */
+/** Which stage a bulk action can legally act on — mirrors the stage machine in ../lib/schema.js. */
 export const ACTIONABLE: Record<string, Stage[]> = {
   draft: ['NEW', 'DRAFTED', 'FAILED'],
   approve: ['DRAFTED'],
@@ -40,13 +40,10 @@ export const ACTIONABLE: Record<string, Stage[]> = {
   send: ['APPROVED'],
 };
 
-/** Workflow toggles, in the order they run. Drives the Settings grid. */
+/** Master switches for the two bulk actions. Drives the Settings grid. */
 export const TOGGLES = [
-  { key: 'toggle_intake', label: 'Intake', workflow: 'WF-01', description: 'Validates new rows in the Applicants tab every 2 minutes.' },
-  { key: 'toggle_draft', label: 'Drafting', workflow: 'WF-02', description: 'Generates email drafts. The only workflow that spends model quota.' },
-  { key: 'toggle_send', label: 'Sending', workflow: 'WF-03', description: 'Sends approved drafts. Off by default — turn it on deliberately.' },
-  { key: 'toggle_replies', label: 'Reply watcher', workflow: 'WF-04', description: 'Polls the mailbox and classifies candidate replies.' },
-  { key: 'toggle_followup', label: 'Follow-up flagging', workflow: 'WF-05', description: 'Flags silent candidates for review. Never sends anything.' },
+  { key: 'toggle_draft', label: 'Drafting', description: 'Allows the Draft action. Spends model quota.' },
+  { key: 'toggle_send', label: 'Sending', description: 'Allows the Send action. Off by default — turn it on deliberately.' },
 ] as const;
 
 export const SEVERITY_ORDER = { fatal: 0, error: 1, warn: 2 } as const;

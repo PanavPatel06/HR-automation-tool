@@ -5,23 +5,15 @@ on:
   pull_request:
 
 jobs:
-  engine:
-    name: Engine + workflows
+  lib:
+    name: Library tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
-
-      - name: Unit + bundled-node tests
+      - name: Unit tests
         run: node --test "tests/**/*.test.js"
-
-      # Fails if committed workflow JSON is stale, if a Code node reads a
-      # $('Node') that does not exist or is not upstream, if a node is
-      # unreachable, if a webhook lacks signature verification, or if a
-      # generated body does not parse.
-      - name: Validate workflow graphs
-        run: node scripts/build-workflows.mjs --check
 
   dashboard:
     name: Dashboard

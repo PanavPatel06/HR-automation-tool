@@ -1,8 +1,8 @@
 node_modules/
 .env
 .env.local
-n8n/.env
 *.log
+.data/
 
 # Service-account keys are credentials. Never commit one.
 *service-account*.json

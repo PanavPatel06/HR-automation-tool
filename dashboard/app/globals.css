@@ -54,6 +54,11 @@
   --duration: 140ms;
   --duration-enter: 320ms;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  /* DESIGN.md §2's two curves, renamed sanely — the spec's own "snappy"/
+     "swift" names are inverted against their values (swift is the slower
+     one), so these are named by shape instead. */
+  --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.1); /* small overshoot: hover/press */
+  --ease-expo: cubic-bezier(0.19, 1, 0.22, 1);           /* panel/banner enters */
 }
 
 /* Dark tokens are declared twice on purpose: once behind the OS preference
@@ -124,6 +129,41 @@
   --shadow-panel: 0 0 0 1px rgba(255, 255, 255, 0.02) inset, 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
+/* Wide-gamut layer, DESIGN.md §2's `color(display-p3 …)` approach — but
+   unlike the reference (§10 flags this as a real defect: P3 declared with
+   *no* fallback anywhere on the page), every value here only applies inside
+   an `@supports` feature query, so the hex above is what non-P3 browsers
+   see; this is the exact ladder DESIGN.md's own accessibility notes say
+   Aave's build is missing. */
+@supports (color: color(display-p3 1 1 1)) {
+  :root {
+    --purple: color(display-p3 0.4275 0.3098 0.8784);
+    --purple-strong: color(display-p3 0.3529 0.2471 0.7686);
+    --danger: color(display-p3 0.7059 0.2039 0.1647);
+    --warn: color(display-p3 0.5608 0.3529 0.0471);
+    --ok: color(display-p3 0.1216 0.4784 0.302);
+    --info-fg: color(display-p3 0.2941 0.2471 0.6824);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --purple: color(display-p3 0.6392 0.5804 1);
+      --purple-strong: color(display-p3 0.7137 0.6627 1);
+      --danger: color(display-p3 0.9412 0.5176 0.4863);
+      --warn: color(display-p3 0.8902 0.6706 0.3333);
+      --ok: color(display-p3 0.4235 0.7725 0.5882);
+      --info-fg: color(display-p3 0.7373 0.6941 0.9333);
+    }
+  }
+  :root[data-theme="dark"] {
+    --purple: color(display-p3 0.6392 0.5804 1);
+    --purple-strong: color(display-p3 0.7137 0.6627 1);
+    --danger: color(display-p3 0.9412 0.5176 0.4863);
+    --warn: color(display-p3 0.8902 0.6706 0.3333);
+    --ok: color(display-p3 0.4235 0.7725 0.5882);
+    --info-fg: color(display-p3 0.7373 0.6941 0.9333);
+  }
+}
+
 * { box-sizing: border-box; }
 
 body {
@@ -153,10 +193,31 @@ textarea:focus-visible, [tabindex]:focus-visible {
 
 /* --- nav --- */
 .nav {
+  position: relative;
   display: flex; align-items: center; gap: 2px;
   padding: 16px 0; margin-bottom: 24px;
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
+}
+/* The one loose adaptation of DESIGN.md §5a's WebGL fluid-sim background —
+   scaled down to something appropriate for a strip behind a nav bar, not a
+   full-viewport marketing hero: a 2D canvas (no WebGL) drawing a couple of
+   slow-drifting soft gradients, rendered small and blurred via CSS filter —
+   the same "render tiny, upscale, blur" trick §5a documents, without a
+   shader. See components/Nav.tsx for the draw loop; it never runs at all
+   under prefers-reduced-motion (one static frame instead), matching §7c's
+   verdict that reduced-motion handling is the strongest pattern in the
+   reference to carry forward. */
+.nav-ambient {
+  position: absolute; inset: -20px 0 -20px 0; z-index: -1;
+  width: 100%; height: calc(100% + 40px);
+  filter: blur(24px);
+  opacity: 0.5;
+  pointer-events: none;
+}
+:root[data-theme="dark"] .nav-ambient { opacity: 0.35; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .nav-ambient { opacity: 0.35; }
 }
 .nav .brand {
   font-weight: 650; margin-right: 18px; letter-spacing: -0.015em;
@@ -199,12 +260,22 @@ textarea:focus-visible, [tabindex]:focus-visible {
   letter-spacing: 0.07em; color: var(--purple); margin-bottom: 8px;
 }
 
+/* DESIGN.md §3's "accent word": one or two words per h1, in an italic serif,
+   purple — used on exactly one heading (see app/page.tsx), matching the
+   reference's own restraint (4 instances across a whole homepage). Aave
+   Aguzzo is Aave's brand asset; --font-accent is a freely-licensed lookalike
+   loaded in app/layout.tsx. */
+.accent {
+  font-family: var(--font-accent), Georgia, "Times New Roman", serif;
+  font-style: italic; color: var(--purple);
+}
+
 /* --- panels --- */
 .panel {
   background: var(--panel); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 20px; margin-bottom: 16px;
   box-shadow: var(--shadow-panel);
-  animation: fade-up var(--duration-enter) var(--ease) both;
+  animation: fade-up var(--duration-enter) var(--ease-expo) both;
 }
 .panel h2 { margin: 0 0 4px; font-size: 15px; font-weight: 630; letter-spacing: -0.01em; }
 .panel .sub { color: var(--fg-muted); font-size: 13px; margin: 0 0 14px; max-width: 68ch; }
@@ -218,7 +289,7 @@ h3 { font-size: 13.5px; font-weight: 630; letter-spacing: -0.005em; }
 .table-wrap {
   overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--panel); box-shadow: var(--shadow-panel);
-  animation: fade-up var(--duration-enter) var(--ease) both;
+  animation: fade-up var(--duration-enter) var(--ease-expo) both;
 }
 .table-wrap::-webkit-scrollbar { height: 8px; }
 .table-wrap::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--radius-pill); }
@@ -258,8 +329,8 @@ button, .btn {
   font: inherit; font-weight: 580; cursor: pointer;
   padding: 8px 16px; border-radius: var(--radius-pill);
   border: 1px solid var(--border-strong); background: var(--panel); color: var(--fg);
-  transition: background-color var(--duration) var(--ease), color var(--duration) var(--ease),
-    border-color var(--duration) var(--ease), filter var(--duration) var(--ease);
+  transition: background-color var(--duration) var(--ease-spring), color var(--duration) var(--ease-spring),
+    border-color var(--duration) var(--ease-spring), filter var(--duration) var(--ease-spring);
 }
 button:hover:not(:disabled) { background: var(--panel-2); }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -288,7 +359,7 @@ textarea { width: 100%; font-family: var(--mono); font-size: 12px; }
 .banner {
   display: flex; gap: 12px; align-items: flex-start;
   padding: 12px 15px; border-radius: var(--radius); margin-bottom: 14px; font-size: 13px;
-  animation: fade-up var(--duration-enter) var(--ease) both;
+  animation: fade-up var(--duration-enter) var(--ease-expo) both;
 }
 .banner.danger { background: var(--danger-bg); color: var(--danger); }
 .banner.warn { background: var(--warn-bg); color: var(--warn); }
@@ -310,7 +381,7 @@ textarea { width: 100%; font-family: var(--mono); font-size: 12px; }
 .stat {
   background: var(--panel); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow-panel);
-  animation: fade-up var(--duration-enter) var(--ease) both;
+  animation: fade-up var(--duration-enter) var(--ease-expo) both;
 }
 .grid .stat:nth-child(1) { animation-delay: 0ms; }
 .grid .stat:nth-child(2) { animation-delay: 35ms; }
@@ -336,16 +407,25 @@ details.hint-details summary { cursor: pointer; color: var(--fg-muted); font-siz
   border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--panel); box-shadow: var(--shadow-panel);
   max-height: 640px; overflow-y: auto;
-  animation: fade-up var(--duration-enter) var(--ease) both;
+  animation: fade-up var(--duration-enter) var(--ease-expo) both;
+}
+.inbox-group-header {
+  padding: 7px 14px; font-size: 10.5px; font-weight: 660; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--fg-subtle); background: var(--panel-2);
+  border-bottom: 1px solid var(--border); position: sticky; top: 0;
 }
 .inbox-item {
-  display: block; width: 100%; text-align: left; font: inherit;
-  padding: 10px 14px; border: 0; border-bottom: 1px solid var(--border);
-  border-radius: 0; background: transparent; color: var(--fg);
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
 }
 .inbox-list .inbox-item:last-child { border-bottom: 0; }
-.inbox-item:hover:not(:disabled) { background: var(--panel-2); }
+.inbox-item:hover { background: var(--panel-2); }
 .inbox-item.active { background: var(--purple-soft); }
+.inbox-item-check { margin-top: 3px; flex: none; }
+.inbox-item-body {
+  display: block; flex: 1; min-width: 0; text-align: left; font: inherit;
+  padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--fg);
+}
 .inbox-item-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .inbox-item-name { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px; }
 .inbox-item-snippet { font-size: 12px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -356,13 +436,21 @@ details.hint-details summary { cursor: pointer; color: var(--fg-muted); font-siz
 .bubble {
   background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--border-strong);
   border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow-panel);
-  animation: fade-up var(--duration-enter) var(--ease) both;
+  animation: fade-up var(--duration-enter) var(--ease-expo) both;
 }
 .bubble-sent { border-left-color: var(--purple); }
 .bubble-reply { border-left-color: var(--warn); }
 .bubble-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px; }
 .bubble-subject { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
 .bubble .preview { max-height: 280px; }
+
+.attachment-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.attachment-pill { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+a.attachment-pill:hover { background: var(--panel-2); }
+.attachment-remove {
+  padding: 0; width: 16px; height: 16px; min-width: 0; border: 0; border-radius: 50%;
+  background: var(--panel-2); color: var(--fg-muted); font-size: 12px; line-height: 1;
+}
 
 @media (max-width: 760px) {
   .inbox-layout { grid-template-columns: 1fr; }
@@ -374,7 +462,7 @@ details.hint-details summary { cursor: pointer; color: var(--fg-muted); font-siz
   max-width: 360px; margin: 14vh auto;
   background: var(--panel); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 32px 28px; box-shadow: var(--shadow-panel);
-  animation: fade-up var(--duration-enter) var(--ease) both;
+  animation: fade-up var(--duration-enter) var(--ease-expo) both;
 }
 .login-wrap h1 { font-size: 20px; }
 .login-wrap input { width: 100%; margin: 10px 0; }

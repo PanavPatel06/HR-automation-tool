@@ -14,12 +14,13 @@
  */
 
 import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { ROOT } from './lib/bundle.mjs';
 
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
-const { TABS, V1_TABS, columnsFor, validateHeaders, CONFIG_DEFAULTS } = require(join(ROOT, 'n8n/src/lib/schema.js'));
+const { V1_TABS, columnsFor, validateHeaders, CONFIG_DEFAULTS } = require(join(ROOT, 'lib/schema.js'));
 
 const args = process.argv.slice(2);
 const CHECK = args.includes('--check');
@@ -183,15 +184,16 @@ if (SEED && !CHECK) {
     },
   }), 'seeding Templates');
 
-  // Left deliberately bare: WF-01 fills in ids, stages and normalised values,
-  // which is the quickest way to see intake working.
+  // There's no intake workflow to normalise a bare row anymore, so seed each
+  // applicant fully formed: applicant_id, created_at, ..., stage, status
+  // (columns A-L). One row is deliberately invalid, to show a blocked row.
   await api(() => sheets.spreadsheets.values.append({
-    spreadsheetId: SHEET_ID, range: 'Applicants!C:H', valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS',
+    spreadsheetId: SHEET_ID, range: 'Applicants!A:L', valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS',
     requestBody: {
       values: [
-        ['Asha Menon', 'asha.demo@example.com', '', 'Frontend Engineer', 'Junior', ''],
-        ['Ravi Kumar', 'ravi.demo@example.com', '', 'Backend Engineer', 'Senior', ''],
-        ['Not An Email', 'oops-at-example', '', 'Frontend Engineer', 'Junior', ''],
+        ['APP-DEMO-1', now, 'Asha Menon', 'asha.demo@example.com', '', 'Frontend Engineer', 'Junior', '', '', 'manual', 'NEW', 'ok'],
+        ['APP-DEMO-2', now, 'Ravi Kumar', 'ravi.demo@example.com', '', 'Backend Engineer', 'Senior', '', '', 'manual', 'NEW', 'ok'],
+        ['APP-DEMO-3', now, 'Not An Email', 'oops-at-example', '', 'Frontend Engineer', 'Junior', '', '', 'manual', 'NEW', 'blocked'],
       ],
     },
   }), 'seeding demo applicants');

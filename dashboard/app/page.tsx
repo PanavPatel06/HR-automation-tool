@@ -1,21 +1,22 @@
-import { readTabs, parseConfig, SheetsError } from '../lib/sheets';
-import { ApplicantsTable } from '../components/ApplicantsTable';
-import { HeartbeatBanner, ErrorBanner } from '../components/Pills';
+import { readTabs, parseConfig, isDemoMode, SheetsError } from '../lib/sheets';
+import { isGmailConfigured } from '../lib/gmail';
+import { MailView } from '../components/MailView';
+import { ErrorBanner } from '../components/Pills';
 import { pluralise } from '../lib/format';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-export default async function ApplicantsPage() {
+export default async function HomePage() {
   let data;
   try {
-    data = await readTabs(['Applicants', 'JobRoles', 'Config', 'RunLog']);
+    data = await readTabs(['Applicants', 'Templates', 'Replies', 'JobRoles', 'Config']);
   } catch (err) {
     const e = err as SheetsError;
     return (
       <>
         <div className="eyebrow">Hiring pipeline</div>
-        <h1>Applicants</h1>
+        <h1><span className="accent">Inbox</span></h1>
         <ErrorBanner error={{ code: e.code, message: e.message, hint: e.hint }} />
       </>
     );
@@ -24,15 +25,12 @@ export default async function ApplicantsPage() {
   const config = parseConfig(data.Config);
   const applicants = data.Applicants;
   const roles = data.JobRoles.filter((r) => r.is_open !== 'FALSE').map((r) => r.title).filter(Boolean);
-
-  const heartbeat = data.RunLog
-    .filter((r) => r.workflow === 'WF-91 Heartbeat')
-    .sort((a, b) => b.finished_at.localeCompare(a.finished_at))[0];
+  const categories = Array.isArray(config.categories) ? config.categories as string[] : [];
 
   const count = (fn: (r: (typeof applicants)[number]) => boolean) => applicants.filter(fn).length;
   const stats = [
     { label: 'Total', value: applicants.length, note: `${pluralise(roles.length, 'open role')}` },
-    { label: 'Awaiting draft', value: count((r) => r.stage === 'NEW'), note: 'picked up automatically' },
+    { label: 'Awaiting draft', value: count((r) => r.stage === 'NEW'), note: 'click Draft to generate' },
     { label: 'Awaiting approval', value: count((r) => r.stage === 'DRAFTED'), note: 'needs a human' },
     { label: 'Ready to send', value: count((r) => r.stage === 'APPROVED'), note: config.dry_run ? 'dry run is ON' : 'live sending' },
     { label: 'Sent', value: count((r) => r.stage === 'SENT'), note: `${count((r) => r.stage === 'REPLIED')} replied` },
@@ -42,12 +40,11 @@ export default async function ApplicantsPage() {
   return (
     <>
       <div className="eyebrow">Hiring pipeline</div>
-      <h1>Applicants</h1>
+      <h1><span className="accent">Inbox</span></h1>
       <p className="page-sub">
-        The pipeline, end to end. Rows arrive from the Applicants tab; everything after that happens here.
+        Every candidate, one place. Work the pipeline in bulk, or open a thread to reply — by
+        template, by hand, or with AI — before anything goes out.
       </p>
-
-      <HeartbeatBanner lastSeen={heartbeat?.finished_at} />
 
       {config.dry_run ? (
         <div className="banner info">
@@ -60,7 +57,7 @@ export default async function ApplicantsPage() {
       ) : (
         <div className="banner warn">
           <span>!</span>
-          <div><strong>Live sending is enabled.</strong> <span className="hint">Approved drafts will reach real candidates.</span></div>
+          <div><strong>Live sending is enabled.</strong> <span className="hint">Approved drafts and Inbox replies will reach real candidates.</span></div>
         </div>
       )}
 
@@ -74,9 +71,14 @@ export default async function ApplicantsPage() {
         ))}
       </div>
 
-      <ApplicantsTable
-        rows={applicants}
+      <MailView
+        applicants={applicants}
+        templates={data.Templates}
+        replies={data.Replies}
         roles={roles}
+        categories={categories}
+        demoMode={isDemoMode()}
+        gmailConfigured={isGmailConfigured()}
         dryRun={config.dry_run === true}
         sendEnabled={config.toggle_send === true}
       />

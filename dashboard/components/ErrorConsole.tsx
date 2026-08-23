@@ -8,8 +8,7 @@ import { useAction, ResultBanner } from './useAction';
 
 /**
  * The page you open when something is wrong. Every entry carries its typed
- * code, a human message, the fix, and the correlation id that ties it to a run
- * — so diagnosis never requires opening n8n.
+ * code, a human message, the fix, and the correlation id that ties it to a run.
  */
 export function ErrorConsole({ errors, runs }: { errors: Row[]; runs: Row[] }) {
   const { run, busy, result, clear } = useAction();
