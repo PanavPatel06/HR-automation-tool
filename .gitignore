@@ -12,3 +12,6 @@ node_modules/
 .DS_Store
 .next/
 *.tsbuildinfo
+
+# Local Claude Code project settings — not shared config.
+.claude/
