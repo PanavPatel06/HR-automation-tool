@@ -48,7 +48,7 @@ if (!SHEET_ID) die('SHEET_ID is not set.', 'Add SHEET_ID to .env — it is the i
 const CREDS = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 if (!CREDS || !existsSync(CREDS)) {
   die('GOOGLE_APPLICATION_CREDENTIALS does not point at a readable file.',
-      'Download the service-account JSON key and set GOOGLE_APPLICATION_CREDENTIALS to its absolute path. See docs/deployment.md §2.');
+      'Download the service-account JSON key and set GOOGLE_APPLICATION_CREDENTIALS to its absolute path. See README.md § Deployment, step 1.');
 }
 
 let google;
