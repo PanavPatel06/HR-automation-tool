@@ -191,6 +191,32 @@ function buildMime({ to, subject, html, text, inReplyTo, references, attachments
 /** Total base64 attachment payload accepted per send — keeps well under Gmail's ~25MB combined limit. */
 export const MAX_ATTACHMENTS_BYTES = 15 * 1024 * 1024;
 
+/**
+ * A template's file attachment is stored as a plain URL (a Drive "anyone
+ * with the link" share, or any other public link) — not uploaded through the
+ * dashboard — so this needs no new OAuth scope beyond what Sheets/Gmail
+ * already use. Fetched fresh at send time rather than cached, so editing the
+ * linked file (e.g. replacing a benefits PDF in Drive) takes effect on the
+ * next send with no template edit needed.
+ */
+export async function fetchUrlAttachment(url: string, filename?: string): Promise<OutgoingAttachment> {
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (err) {
+    throw new GmailError('E-ATTACHMENT-FETCH', `Could not fetch the template attachment.`, `Check the URL is reachable: ${(err as Error)?.message ?? String(err)}`);
+  }
+  if (!res.ok) {
+    throw new GmailError('E-ATTACHMENT-FETCH', `Template attachment URL returned ${res.status}.`, 'Make sure the link is shared "anyone with the link" and reachable without login.');
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length > MAX_ATTACHMENTS_BYTES) {
+    throw new GmailError('E-VALIDATION', 'Template attachment is too large.', `Must stay under ${Math.round(MAX_ATTACHMENTS_BYTES / 1024 / 1024)}MB.`);
+  }
+  const mimeType = res.headers.get('content-type')?.split(';')[0] || 'application/octet-stream';
+  return { filename: filename?.trim() || url.split('/').pop() || 'attachment', mimeType, base64: buf.toString('base64') };
+}
+
 export async function sendMail(args: {
   to: string; subject: string; html: string; threadId?: string;
   inReplyTo?: string; references?: string; attachments?: OutgoingAttachment[];

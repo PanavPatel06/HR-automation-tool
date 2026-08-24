@@ -198,6 +198,22 @@ An email with an unresolved `{{field}}` is **never sent** — it fails as
 `E-MAIL-TEMPLATE` first. `Hi {{first_name}},` reaching a candidate is worse than
 a visible error.
 
+### Attaching a file to a template
+
+Open a template's preview on the **Templates** page and paste a file's URL
+(e.g. a Google Drive link shared **"Anyone with the link"**) into
+**Attachment URL**, then **Save attachment**. That file is fetched fresh and
+attached to every email sent with that template — bulk **Send** and the
+Inbox's per-candidate send both carry it, with no per-applicant upload.
+
+There's no file upload in the dashboard itself: it stores a link (`Templates`
+column `attachment_url`, plus optional `attachment_name` for the filename
+shown to the recipient), not the bytes, so this needs no extra Google API
+scope beyond what Sheets/Gmail already use. Same 15MB cap as manual Inbox
+attachments (`MAX_ATTACHMENTS_BYTES` in `dashboard/lib/gmail.ts`); a link that
+returns an error or a too-large file fails the send with `E-ATTACHMENT-FETCH`
+or `E-VALIDATION` rather than sending without it.
+
 ---
 
 ## Connecting real Gmail to the Inbox

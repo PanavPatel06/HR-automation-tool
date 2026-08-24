@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Row } from '../lib/contract';
 import { isTruthy } from '../lib/contract';
 import { useAction, ResultBanner } from './useAction';
@@ -18,6 +18,11 @@ export function TemplateManager({ templates, roles }: { templates: Row[]; roles:
   const { run, busy, result, clear } = useAction();
   const [preview, setPreview] = useState<Row | null>(null);
   const [brief, setBrief] = useState({ purpose: 'initial outreach to a job applicant', tone: 'warm, professional, concise', job_role: '', notes: '' });
+  const [attachment, setAttachment] = useState({ attachment_url: '', attachment_name: '' });
+
+  useEffect(() => {
+    if (preview) setAttachment({ attachment_url: preview.attachment_url || '', attachment_name: preview.attachment_name || '' });
+  }, [preview]);
 
   return (
     <>
@@ -61,7 +66,7 @@ export function TemplateManager({ templates, roles }: { templates: Row[]; roles:
         <table>
           <thead>
             <tr>
-              <th>Name</th><th>Scope</th><th>Subject</th><th>AI</th><th>Source</th><th>Status</th><th>Updated</th><th></th>
+              <th>Name</th><th>Scope</th><th>Subject</th><th>AI</th><th>File</th><th>Source</th><th>Status</th><th>Updated</th><th></th>
             </tr>
           </thead>
           <tbody>
@@ -80,6 +85,11 @@ export function TemplateManager({ templates, roles }: { templates: Row[]; roles:
                     {isTruthy(t.is_default) ? <div><span className="pill">default</span></div> : null}
                   </td>
                   <td className="truncate">{t.subject}</td>
+                  <td>
+                    {t.attachment_url
+                      ? <a className="pill info" href={t.attachment_url} target="_blank" rel="noreferrer" title={t.attachment_url}>{t.attachment_name || 'file'} 📎</a>
+                      : <span className="muted">none</span>}
+                  </td>
                   <td>
                     {usesAi
                       ? <span className="pill info" title="Contains {{ai_body}} — spends model quota per applicant">personalised</span>
@@ -118,6 +128,38 @@ export function TemplateManager({ templates, roles }: { templates: Row[]; roles:
             <button className="ghost sm" onClick={() => setPreview(null)}>Close</button>
           </div>
           <p className="sub mono">{preview.subject}</p>
+
+          <div className="grid cols-2" style={{ marginBottom: 12 }}>
+            <label>
+              <div className="muted" style={{ marginBottom: 4 }}>Attachment URL (Drive link, shared &quot;anyone with the link&quot;)</div>
+              <input
+                type="text" style={{ width: '100%' }} placeholder="https://drive.google.com/file/d/…/view"
+                value={attachment.attachment_url}
+                onChange={(e) => setAttachment({ ...attachment, attachment_url: e.target.value })}
+              />
+            </label>
+            <label>
+              <div className="muted" style={{ marginBottom: 4 }}>Shown as (optional)</div>
+              <input
+                type="text" style={{ width: '100%' }} placeholder="benefits-overview.pdf"
+                value={attachment.attachment_name}
+                onChange={(e) => setAttachment({ ...attachment, attachment_name: e.target.value })}
+              />
+            </label>
+          </div>
+          <p className="sub">
+            Fetched fresh and attached to every email sent with this template. No upload here —
+            paste a public link (Drive, Dropbox, …); nothing over{' '}
+            {/* keep in sync with MAX_ATTACHMENTS_BYTES in dashboard/lib/gmail.ts */}15MB will send.
+          </p>
+          <button
+            className="sm" disabled={busy !== null}
+            onClick={() => run('set-template-attachment', { template_id: preview.template_id, ...attachment })}
+            style={{ marginBottom: 16 }}
+          >
+            {busy === 'set-template-attachment' ? 'Saving…' : 'Save attachment'}
+          </button>
+
           <div className="preview" dangerouslySetInnerHTML={{ __html: preview.html }} />
           <details className="hint-details" style={{ marginTop: 10 }}>
             <summary>Raw HTML</summary>

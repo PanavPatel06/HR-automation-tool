@@ -15,7 +15,7 @@ export const TABS = {
     'thread_id', 'message_id', 'reply_state', 'approved_by', 'approved_at',
     'error_code', 'error_message', 'correlation_id', 'updated_at',
   ],
-  Templates: ['template_id', 'name', 'job_role', 'category', 'stage', 'subject', 'html', 'source', 'is_active', 'is_default', 'prompt_version', 'created_at', 'updated_at'],
+  Templates: ['template_id', 'name', 'job_role', 'category', 'stage', 'subject', 'html', 'source', 'is_active', 'is_default', 'prompt_version', 'attachment_url', 'attachment_name', 'created_at', 'updated_at'],
   JobRoles: ['role_id', 'title', 'department', 'is_open', 'created_at'],
   EmailLog: ['at', 'correlation_id', 'applicant_id', 'to', 'subject', 'provider', 'result', 'provider_message_id', 'thread_id', 'dry_run', 'error_code', 'error_message'],
   Replies: ['received_at', 'applicant_id', 'thread_id', 'from', 'subject', 'snippet', 'classified_intent', 'confidence', 'model', 'handled_by', 'handled_at'],

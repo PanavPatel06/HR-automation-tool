@@ -5,7 +5,7 @@ import { readTab, patchRows, appendRow, setConfig, isDemoMode, parseConfig, Shee
 import { groqJson, GroqError } from '../../../lib/groq';
 import { buildMergeContext, render, validateHtml, selectTemplate, renderEmail, TemplateError, FIELD_RE } from '../../../lib/template';
 import { selectForDrafting, usesAi, buildDraftPrompt, checkDraftSchema, assembleDraft } from '../../../lib/draft';
-import { findMessagesForAddress, sendMail, isGmailConfigured, GmailError, MAX_ATTACHMENTS_BYTES, type OutgoingAttachment } from '../../../lib/gmail';
+import { findMessagesForAddress, sendMail, fetchUrlAttachment, isGmailConfigured, GmailError, MAX_ATTACHMENTS_BYTES, type OutgoingAttachment } from '../../../lib/gmail';
 import { ACTIONABLE } from '../../../lib/contract';
 
 export const runtime = 'nodejs';
@@ -250,10 +250,6 @@ export async function POST(req: Request) {
       }
 
       const attachments = Array.isArray(body.attachments) ? (body.attachments as OutgoingAttachment[]) : [];
-      const totalAttachmentBytes = attachments.reduce((n, a) => n + (a.base64?.length ?? 0), 0);
-      if (totalAttachmentBytes > MAX_ATTACHMENTS_BYTES) {
-        return fail(413, 'E-VALIDATION', 'Attachments are too large.', `Total attachment size must stay under ${Math.round(MAX_ATTACHMENTS_BYTES / 1024 / 1024)}MB.`);
-      }
 
       const applicants = await readTab('Applicants');
       const applicant = applicants.find((a) => a.applicant_id === applicantId);
@@ -270,6 +266,16 @@ export async function POST(req: Request) {
       // consenting to send real mail, which is the wrong default.
       const dryRun = config.dry_run !== false;
       const willSendForReal = isGmailConfigured() && !dryRun;
+
+      if (templateId) {
+        const templates = await readTab('Templates');
+        const template = templates.find((t) => t.template_id === templateId);
+        if (template?.attachment_url) attachments.push(await fetchUrlAttachment(template.attachment_url, template.attachment_name));
+      }
+      const totalAttachmentBytes = attachments.reduce((n, a) => n + (a.base64?.length ?? 0), 0);
+      if (totalAttachmentBytes > MAX_ATTACHMENTS_BYTES) {
+        return fail(413, 'E-VALIDATION', 'Attachments are too large.', `Total attachment size must stay under ${Math.round(MAX_ATTACHMENTS_BYTES / 1024 / 1024)}MB.`);
+      }
 
       let providerMessageId = '';
       let threadId = applicant.thread_id || `thread-demo-${applicant.applicant_id}`;
@@ -398,9 +404,21 @@ export async function POST(req: Request) {
       const willSendForReal = isGmailConfigured() && !dryRun;
       const cap = Number(config.send_daily_cap) || 400;
 
-      const [applicants, emailLog] = await Promise.all([readTab('Applicants'), readTab('EmailLog')]);
+      const [applicants, emailLog, templates] = await Promise.all([readTab('Applicants'), readTab('EmailLog'), readTab('Templates')]);
       const today = new Date().toISOString().slice(0, 10);
       let budget = Math.max(0, cap - emailLog.filter((r) => r.at.startsWith(today) && r.result === 'sent').length);
+
+      // Fetched once per template_id, not once per applicant — a batch of 200
+      // applicants on one template still only downloads the file once.
+      const attachmentByTemplate = new Map<string, Promise<OutgoingAttachment | null>>();
+      const attachmentFor = (templateId: string) => {
+        if (!templateId) return Promise.resolve(null);
+        if (!attachmentByTemplate.has(templateId)) {
+          const t = templates.find((row) => row.template_id === templateId);
+          attachmentByTemplate.set(templateId, t?.attachment_url ? fetchUrlAttachment(t.attachment_url, t.attachment_name) : Promise.resolve(null));
+        }
+        return attachmentByTemplate.get(templateId)!;
+      };
 
       const now = new Date().toISOString();
       const patches: Patch[] = [];
@@ -431,8 +449,10 @@ export async function POST(req: Request) {
         let threadId = a.thread_id || '';
         if (willSendForReal) {
           try {
+            const templateAttachment = await attachmentFor(a.template_id);
             const sent = await sendMail({
               to: a.email, subject: a.email_subject, html: a.email_html,
+              attachments: templateAttachment ? [templateAttachment] : undefined,
               threadId: a.thread_id || undefined, inReplyTo: a.message_id || undefined, references: a.message_id || undefined,
             });
             providerMessageId = sent.id;
@@ -558,6 +578,21 @@ export async function POST(req: Request) {
         await patchRows('Templates', [{ _row: target._row, is_active: active ? 'TRUE' : 'FALSE', updated_at: new Date().toISOString() }]);
         revalidatePath('/', 'layout');
         return NextResponse.json({ ok: true, result: { status: 'ok', notes: `${target.name} ${active ? 'activated' : 'deactivated'}` } });
+      }
+
+      case 'set-template-attachment': {
+        const templateId = String(body.template_id ?? '');
+        const attachmentUrl = String(body.attachment_url ?? '').trim();
+        const attachmentName = String(body.attachment_name ?? '').trim();
+        if (attachmentUrl && !/^https?:\/\//i.test(attachmentUrl)) {
+          return fail(400, 'E-VALIDATION', 'Attachment URL must start with http:// or https://.');
+        }
+        const rows = await readTab('Templates');
+        const target = rows.find((r) => r.template_id === templateId);
+        if (!target) return fail(404, 'E-NOTFOUND', `Template ${templateId} does not exist.`);
+        await patchRows('Templates', [{ _row: target._row, attachment_url: attachmentUrl, attachment_name: attachmentName, updated_at: new Date().toISOString() }]);
+        revalidatePath('/', 'layout');
+        return NextResponse.json({ ok: true, result: { status: 'ok', notes: attachmentUrl ? `Attachment set on ${target.name}.` : `Attachment removed from ${target.name}.` } });
       }
 
       case 'resolve-error': {

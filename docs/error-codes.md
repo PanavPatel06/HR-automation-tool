@@ -67,6 +67,7 @@ address, already sent, or the daily cap reached.
 | `E-GMAIL-AUTH` | OAuth refresh token revoked or scope insufficient | Re-run `npm run gmail:oauth` and update `GMAIL_REFRESH_TOKEN`. |
 | `E-GMAIL-429` | Gmail rate limit | Wait a moment and try again. |
 | `E-VALIDATION` | Attachments exceed the size cap | Trim attachments to under the limit shown in the message. |
+| `E-ATTACHMENT-FETCH` | A template's `attachment_url` was unreachable or returned a non-2xx status when sending | Confirm the link is shared "Anyone with the link" and loads without signing in. |
 
 ## Request-level codes
 

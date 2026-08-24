@@ -32,7 +32,7 @@ candidate to see their whole thread and reply.
 | Action | Goes to | Why |
 |---|---|---|
 | Draft, send, generate template, preflight | **Sheets directly (+ Groq / Gmail)** | Runs in-process in `app/api/action/route.ts` — see `lib/draft.ts`, `lib/groq.ts`, `lib/gmail.ts`. No separate backend. |
-| Approve, unapprove, toggle, activate template, resolve error, set category | **Sheets directly** | Pure state changes. Approval in particular must never leave this process — it is the human gate. |
+| Approve, unapprove, toggle, activate template, set template attachment, resolve error, set category | **Sheets directly** | Pure state changes. Approval in particular must never leave this process — it is the human gate. |
 | Inbox: load template into compose, AI reply draft | **Sheets directly (+ Groq)** | Pure read + a Groq call, no Sheets write — works with real Sheets too, as long as `GROQ_API_KEY` is set. |
 | Inbox: send reply | **Sheets: demo mode only. Transport: Gmail if configured, else simulated.** — see below | The Sheets write (EmailLog) needs the demo store today; the Gmail *send* is a separate, optional gate. |
 | Inbox: start a new conversation (`+ New`) | **Sheets directly, both modes** | Appends a fresh Applicants row (`appendRow()` in `lib/sheets.ts` — real `values.append` in real mode, in-memory push in demo mode) for someone not yet in the pipeline, so their thread can be opened and, if Gmail is configured, synced immediately. |

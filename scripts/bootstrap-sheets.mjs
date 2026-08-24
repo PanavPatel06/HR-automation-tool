@@ -174,12 +174,12 @@ if (SEED && !CHECK) {
     '<p>{{hr_signature}}</p>',
   ].join('\n');
   await api(() => sheets.spreadsheets.values.append({
-    spreadsheetId: SHEET_ID, range: 'Templates!A:M', valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS',
+    spreadsheetId: SHEET_ID, range: 'Templates!A:O', valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS',
     requestBody: {
       values: [[
         'TPL-DEFAULT', 'Default outreach', '', '', 'outreach',
         'Your application for {{job_role}} at {{company_name}}',
-        templateHtml, 'seed', 'TRUE', 'TRUE', 'seed.v1', now, now,
+        templateHtml, 'seed', 'TRUE', 'TRUE', 'seed.v1', '', '', now, now,
       ]],
     },
   }), 'seeding Templates');
