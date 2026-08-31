@@ -59,13 +59,12 @@ export async function POST(req: Request) {
       // Every template — hand-written seed or AI-generated — shares the same
       // branded shell (logo, contact header, footer); only this inner
       // message fragment differs. See renderSkeleton() in lib/template.ts.
-      const logoUrl = String(parseConfig(await readTab('Config')).company_logo_url ?? '');
       const created = await appendRow('Templates', {
         template_id: `TPL-AI-${Date.now().toString(36).toUpperCase()}`,
         name: `AI draft — ${jobRole || 'any role'}`,
         job_role: jobRole,
         subject: generated.subject || `Your application for ${jobRole || 'the role'}`,
-        html: renderSkeleton(generated.html || DEFAULT_TEMPLATE_BODY, logoUrl),
+        html: renderSkeleton(generated.html || DEFAULT_TEMPLATE_BODY),
         source: 'ai',
         is_active: 'FALSE',
         is_default: 'FALSE',

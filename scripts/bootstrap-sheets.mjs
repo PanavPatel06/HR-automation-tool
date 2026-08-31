@@ -173,9 +173,7 @@ if (SEED && !CHECK) {
   // import that file directly: it's TypeScript marked 'server-only', and this
   // script runs as plain Node outside the dashboard's Next.js build, same
   // reason dashboard/lib/contract.ts mirrors lib/schema.js by hand.
-  const logo = process.env.COMPANY_LOGO_URL
-    ? `<img src="${process.env.COMPANY_LOGO_URL}" alt="{{company_name}}" width="150" style="display:block;border:0;outline:none;text-decoration:none;height:auto;">`
-    : '<span style="font-size:22px;font-weight:400;letter-spacing:0.2em;color:#0a0a0a;white-space:nowrap;"><span style="font-weight:700;">3</span>SPACE</span>';
+  const logo = '<img src="{{company_logo_url}}" alt="{{company_name}}" width="150" style="display:block;border:0;outline:none;text-decoration:none;height:auto;">';
   const templateHtml = [
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f5f5f4;padding:40px 0;font-family:Helvetica,Arial,sans-serif;">',
     '<tr><td align="center">',

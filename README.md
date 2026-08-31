@@ -372,22 +372,27 @@ in `scripts/bootstrap-sheets.mjs`'s seed — see the comment on `templateHtml`
 for why it's duplicated). The contact fields are ordinary Config values,
 editable in **Settings** exactly like `company_name`.
 
-**Using the real logo.** Templates ship with a text wordmark and switch to an
-image once one exists:
+**The logo.** It lives at `dashboard/public/brand/logo.png` and needs no
+setup — templates reference `{{company_logo_url}}`, and `resolveLogoUrl()`
+resolves that per send to `<deployment origin>/brand/logo.png`, reading the
+origin Render and Vercel already publish (`RENDER_EXTERNAL_URL` /
+`VERCEL_URL`). Set `company_logo_url` in **Settings** only to point somewhere
+else; `COMPANY_LOGO_BASE_URL` overrides the origin if it's ever guessed wrong.
 
-1. Save the logo as `dashboard/public/brand/logo.png` (300–600px wide; it
-   renders at 150px).
-2. Set `company_logo_url` on the **Settings** page to
-   `https://<your-dashboard-domain>/brand/logo.png`.
-3. Generate a template — it uses the image. To rebrand the seed template too,
-   re-run `npm run bootstrap:sheets -- --seed-demo` with `COMPANY_LOGO_URL`
-   set, or paste the `<img>` into the existing row.
+Two things that look like details and are not:
 
-`/brand/*` is deliberately outside the session gate in `middleware.ts` —
-mail clients fetch images anonymously, and a login-gated URL reaches
-candidates as a broken image. The URL is baked in when a template is
-generated rather than left as a merge field: an empty merge field counts as
-unresolved and would block the send outright.
+- `/brand/*` sits outside the session gate in `middleware.ts`, because mail
+  clients fetch images anonymously — behind the gate the logo reaches
+  candidates as a broken image.
+- The URL resolves per send rather than being baked into each stored
+  template, so moving the dashboard to a new domain doesn't strand templates
+  that were already generated. `resolveLogoUrl()` never returns empty: an
+  unresolved merge field fails the send closed, and a missing logo is not a
+  reason to stop an email going out.
+
+To swap the artwork, overwrite `logo.png` — trimmed, transparent, ~450px
+wide (it renders at 150px; the extra pixels are for retina). See
+`dashboard/public/brand/README.md`.
 
 Hand-written templates (uploaded or typed directly into the Templates tab)
 are untouched — the skeleton only wraps the seed template and new AI drafts,

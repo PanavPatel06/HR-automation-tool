@@ -162,7 +162,7 @@ function buildDemoStore(): Record<TabName, Row[]> {
       { key: 'company_email', value: '3spacetechcorp@gmail.com', type: 'string', description: 'Merge field {{company_email}} — shown in the branded template header.', updated_at: ago(30 * DAY) },
       { key: 'company_phone', value: 'Tel: +91 63519 32850<br>+91 87809 97391', type: 'string', description: 'Merge field {{company_phone}}. HTML allowed.', updated_at: ago(30 * DAY) },
       { key: 'company_incubator', value: 'Incubated at<br>PDEU IIC, Gandhinagar', type: 'string', description: 'Merge field {{company_incubator}}. HTML allowed.', updated_at: ago(30 * DAY) },
-      { key: 'company_logo_url', value: '', type: 'string', description: 'Public image URL for the logo in generated templates. Blank uses the text wordmark. Must load without a login — mail clients fetch it anonymously.', updated_at: ago(30 * DAY) },
+      { key: 'company_logo_url', value: '', type: 'string', description: 'Merge field {{company_logo_url}}. Blank derives it from the deployment origin (<dashboard>/brand/logo.png). Set it only if the logo lives elsewhere — it must load without a login.', updated_at: ago(30 * DAY) },
     ]); })(),
   } as Record<TabName, Row[]>;
 

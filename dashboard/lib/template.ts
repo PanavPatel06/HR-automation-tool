@@ -49,6 +49,29 @@ export function escapeHtml(value: unknown): string {
 
 export type MergeContext = Record<string, string>;
 
+/**
+ * Where the logo in the branded skeleton is fetched from. Mail clients load
+ * it anonymously, so it has to be an absolute, publicly reachable URL —
+ * `/brand/*` is outside the session gate in middleware.ts for exactly this.
+ *
+ * Deliberately never returns empty: an unresolved merge field fails the send
+ * closed (renderEmail() below), and a missing logo is not a reason to stop an
+ * offer letter going out. Worst case it resolves to a URL that 404s and the
+ * `alt` text shows instead. Render and Vercel both publish the deployment's
+ * own origin, so this is usually right with nothing configured at all.
+ */
+function resolveLogoUrl(config: Record<string, unknown>): string {
+  const configured = String(config.company_logo_url ?? '').trim();
+  if (configured) return configured;
+
+  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+  const base = process.env.COMPANY_LOGO_BASE_URL
+    || process.env.RENDER_EXTERNAL_URL
+    || (vercel ? `https://${vercel}` : '')
+    || 'http://localhost:3000';
+  return `${base.replace(/\/+$/, '')}/brand/logo.png`;
+}
+
 /** Build the merge context for one applicant. */
 export function buildMergeContext(applicant: Record<string, string>, config: Record<string, unknown> = {}): MergeContext {
   const name = String(applicant.name || '').trim();
@@ -67,6 +90,7 @@ export function buildMergeContext(applicant: Record<string, string>, config: Rec
     company_email: String(config.company_email ?? ''),
     company_phone: String(config.company_phone ?? ''),
     company_incubator: String(config.company_incubator ?? ''),
+    company_logo_url: resolveLogoUrl(config),
   };
 }
 
@@ -177,14 +201,6 @@ const TEMPLATE_SKELETON = [
   '</table>',
 ].join('\n');
 
-/**
- * The wordmark, used until a real logo file exists. Set the `company_logo_url`
- * Config value to an image the whole internet can fetch (mail clients load it
- * anonymously — a login-gated URL renders as a broken image) and generated
- * templates use that instead.
- */
-const WORDMARK = '<span style="font-size:22px;font-weight:400;letter-spacing:0.2em;color:#0a0a0a;white-space:nowrap;"><span style="font-weight:700;">3</span>SPACE</span>';
-
 /** The default seed template's message — plugged into TEMPLATE_SKELETON's %%BODY%% slot. */
 export const DEFAULT_TEMPLATE_BODY = [
   '<p style="margin:0 0 18px;">Hi {{first_name}},</p>',
@@ -194,16 +210,14 @@ export const DEFAULT_TEMPLATE_BODY = [
 
 /**
  * Slot a message fragment into the branded skeleton — used for the seed
- * template and every AI-generated one, so both look identical. `logoUrl` is
- * baked in at generation time rather than left as a merge field: an empty
- * merge field counts as unresolved and would block the send outright, and a
- * URL that 404s would reach candidates as a broken image.
+ * template and every AI-generated one, so both look identical.
+ *
+ * The logo is `{{company_logo_url}}`, resolved per-send by
+ * resolveLogoUrl() rather than baked in here, so moving the dashboard to a
+ * new domain doesn't strand every template that was already generated.
  */
-export function renderSkeleton(bodyHtml: string, logoUrl = ''): string {
-  const url = String(logoUrl || '').trim();
-  const logo = url
-    ? `<img src="${escapeHtml(url)}" alt="{{company_name}}" width="150" style="display:block;border:0;outline:none;text-decoration:none;height:auto;">`
-    : WORDMARK;
+export function renderSkeleton(bodyHtml: string): string {
+  const logo = '<img src="{{company_logo_url}}" alt="{{company_name}}" width="150" style="display:block;border:0;outline:none;text-decoration:none;height:auto;">';
   return TEMPLATE_SKELETON.replace('%%LOGO%%', logo).replace('%%BODY%%', bodyHtml);
 }
 
