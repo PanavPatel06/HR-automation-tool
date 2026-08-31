@@ -144,45 +144,67 @@ function truthy(v: unknown): boolean {
 }
 
 /**
- * The branded email shell every template starts from — logo mark, contact
- * header, and a footer credit, matching 3Space's letterhead. `%%BODY%%` is
- * where the message itself goes; renderSkeleton() below fills it in.
+ * The branded email shell every template starts from — logo, contact header,
+ * hairline rule, and a footer line, following the company letterhead:
+ * monochrome, square-cornered, thin rules, wide-tracked caps. Deliberately no
+ * purple and no rounded corners — the dashboard's own accent would fight a
+ * wordmark built entirely from hard angles.
+ *
+ * `%%LOGO%%` and `%%BODY%%` are filled in by renderSkeleton() below.
  *
  * Table-based with every style inline, not a `<style>` block or `<div>`
  * layout — the only markup that renders identically across Gmail, Outlook,
- * and every other mail client. `#6d4fe0` mirrors the dashboard's own brand
- * accent (`--purple` in app/globals.css), so the email and the app match.
+ * and every other mail client.
  */
 const TEMPLATE_SKELETON = [
-  '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f3f1;padding:32px 0;font-family:Arial,Helvetica,sans-serif;">',
+  '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f5f5f4;padding:40px 0;font-family:Helvetica,Arial,sans-serif;">',
   '<tr><td align="center">',
-  '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:10px;">',
-  '<tr><td style="padding:32px 36px 18px 36px;">',
+  '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border:1px solid #e6e4e0;">',
+  '<tr><td style="height:3px;background-color:#0a0a0a;font-size:0;line-height:0;">&nbsp;</td></tr>',
+  '<tr><td style="padding:30px 36px 22px 36px;">',
   '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>',
-  '<td style="font-size:24px;font-weight:700;letter-spacing:1px;color:#1a1a1a;"><span style="color:#6d4fe0;">3</span>SPACE</td>',
-  '<td align="right" style="font-size:11px;line-height:1.7;color:#87837a;">{{company_email}}<br>{{company_phone}}<br>{{company_incubator}}</td>',
+  '<td valign="middle">%%LOGO%%</td>',
+  '<td valign="middle" align="right" style="font-size:10.5px;line-height:1.8;color:#8b8880;letter-spacing:0.02em;">{{company_email}}<br>{{company_phone}}<br>{{company_incubator}}</td>',
   '</tr></table>',
   '</td></tr>',
-  '<tr><td style="padding:0 36px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="border-top:2px solid #6d4fe0;font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr>',
-  '<tr><td style="padding:30px 36px;font-size:15px;line-height:1.65;color:#1a1a1a;">',
+  '<tr><td style="padding:0 36px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="border-top:1px solid #0a0a0a;font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr>',
+  '<tr><td style="padding:32px 36px;font-size:15px;line-height:1.75;color:#1a1a1a;">',
   '%%BODY%%',
   '</td></tr>',
-  '<tr><td style="padding:18px 36px 30px;border-top:1px solid #ece9e4;font-size:11px;color:#a5a196;">{{company_name}} &middot; {{company_incubator}}</td></tr>',
+  '<tr><td style="padding:18px 36px 26px 36px;border-top:1px solid #ededea;font-size:10px;line-height:1.7;letter-spacing:0.09em;text-transform:uppercase;color:#a8a49b;">{{company_name}} &middot; {{company_email}}</td></tr>',
   '</table>',
   '</td></tr>',
   '</table>',
 ].join('\n');
+
+/**
+ * The wordmark, used until a real logo file exists. Set the `company_logo_url`
+ * Config value to an image the whole internet can fetch (mail clients load it
+ * anonymously — a login-gated URL renders as a broken image) and generated
+ * templates use that instead.
+ */
+const WORDMARK = '<span style="font-size:22px;font-weight:400;letter-spacing:0.2em;color:#0a0a0a;white-space:nowrap;"><span style="font-weight:700;">3</span>SPACE</span>';
 
 /** The default seed template's message — plugged into TEMPLATE_SKELETON's %%BODY%% slot. */
 export const DEFAULT_TEMPLATE_BODY = [
-  '<p style="margin:0 0 16px;">Hi {{first_name}},</p>',
+  '<p style="margin:0 0 18px;">Hi {{first_name}},</p>',
   '{{ai_body}}',
-  '<p style="margin:24px 0 0;">{{hr_signature}}</p>',
+  '<p style="margin:26px 0 0;">{{hr_signature}}</p>',
 ].join('\n');
 
-/** Slot a message fragment into the branded skeleton. Used for the default seed template and every AI-generated one, so both look identical. */
-export function renderSkeleton(bodyHtml: string): string {
-  return TEMPLATE_SKELETON.replace('%%BODY%%', bodyHtml);
+/**
+ * Slot a message fragment into the branded skeleton — used for the seed
+ * template and every AI-generated one, so both look identical. `logoUrl` is
+ * baked in at generation time rather than left as a merge field: an empty
+ * merge field counts as unresolved and would block the send outright, and a
+ * URL that 404s would reach candidates as a broken image.
+ */
+export function renderSkeleton(bodyHtml: string, logoUrl = ''): string {
+  const url = String(logoUrl || '').trim();
+  const logo = url
+    ? `<img src="${escapeHtml(url)}" alt="{{company_name}}" width="150" style="display:block;border:0;outline:none;text-decoration:none;height:auto;">`
+    : WORDMARK;
+  return TEMPLATE_SKELETON.replace('%%LOGO%%', logo).replace('%%BODY%%', bodyHtml);
 }
 
 export type TemplateRow = Record<string, string>;

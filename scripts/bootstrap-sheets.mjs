@@ -173,23 +173,27 @@ if (SEED && !CHECK) {
   // import that file directly: it's TypeScript marked 'server-only', and this
   // script runs as plain Node outside the dashboard's Next.js build, same
   // reason dashboard/lib/contract.ts mirrors lib/schema.js by hand.
+  const logo = process.env.COMPANY_LOGO_URL
+    ? `<img src="${process.env.COMPANY_LOGO_URL}" alt="{{company_name}}" width="150" style="display:block;border:0;outline:none;text-decoration:none;height:auto;">`
+    : '<span style="font-size:22px;font-weight:400;letter-spacing:0.2em;color:#0a0a0a;white-space:nowrap;"><span style="font-weight:700;">3</span>SPACE</span>';
   const templateHtml = [
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f3f1;padding:32px 0;font-family:Arial,Helvetica,sans-serif;">',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f5f5f4;padding:40px 0;font-family:Helvetica,Arial,sans-serif;">',
     '<tr><td align="center">',
-    '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:10px;">',
-    '<tr><td style="padding:32px 36px 18px 36px;">',
+    '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border:1px solid #e6e4e0;">',
+    '<tr><td style="height:3px;background-color:#0a0a0a;font-size:0;line-height:0;">&nbsp;</td></tr>',
+    '<tr><td style="padding:30px 36px 22px 36px;">',
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>',
-    '<td style="font-size:24px;font-weight:700;letter-spacing:1px;color:#1a1a1a;"><span style="color:#6d4fe0;">3</span>SPACE</td>',
-    '<td align="right" style="font-size:11px;line-height:1.7;color:#87837a;">{{company_email}}<br>{{company_phone}}<br>{{company_incubator}}</td>',
+    `<td valign="middle">${logo}</td>`,
+    '<td valign="middle" align="right" style="font-size:10.5px;line-height:1.8;color:#8b8880;letter-spacing:0.02em;">{{company_email}}<br>{{company_phone}}<br>{{company_incubator}}</td>',
     '</tr></table>',
     '</td></tr>',
-    '<tr><td style="padding:0 36px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="border-top:2px solid #6d4fe0;font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr>',
-    '<tr><td style="padding:30px 36px;font-size:15px;line-height:1.65;color:#1a1a1a;">',
-    '<p style="margin:0 0 16px;">Hi {{first_name}},</p>',
+    '<tr><td style="padding:0 36px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="border-top:1px solid #0a0a0a;font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr>',
+    '<tr><td style="padding:32px 36px;font-size:15px;line-height:1.75;color:#1a1a1a;">',
+    '<p style="margin:0 0 18px;">Hi {{first_name}},</p>',
     '{{ai_body}}',
-    '<p style="margin:24px 0 0;">{{hr_signature}}</p>',
+    '<p style="margin:26px 0 0;">{{hr_signature}}</p>',
     '</td></tr>',
-    '<tr><td style="padding:18px 36px 30px;border-top:1px solid #ece9e4;font-size:11px;color:#a5a196;">{{company_name}} &middot; {{company_incubator}}</td></tr>',
+    '<tr><td style="padding:18px 36px 26px 36px;border-top:1px solid #ededea;font-size:10px;line-height:1.7;letter-spacing:0.09em;text-transform:uppercase;color:#a8a49b;">{{company_name}} &middot; {{company_email}}</td></tr>',
     '</table>',
     '</td></tr>',
     '</table>',

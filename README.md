@@ -356,20 +356,38 @@ a visible error.
 ### The branded skeleton
 
 Every template — the seed default and every AI-generated one — is wrapped in
-the same branded shell: the 3Space wordmark and a contact header
-(`{{company_email}}` / `{{company_phone}}` / `{{company_incubator}}`) at the
-top, an accent rule, then the message, then a small footer credit. It's
-table-based with every style inline rather than a `<style>` block, which is
-the only markup that renders identically in Gmail, Outlook, and everything
-else.
+the same shell, following the company letterhead: monochrome, square-cornered,
+hairline rules, wide-tracked caps. A black top strip, the logo with a contact
+block opposite it (`{{company_email}}` / `{{company_phone}}` /
+`{{company_incubator}}`), a rule, the message, then a small uppercase footer
+line. It's table-based with every style inline rather than a `<style>` block,
+which is the only markup that renders identically in Gmail, Outlook, and
+everything else.
 
 `renderSkeleton()` in `dashboard/lib/template.ts` does the wrapping — the AI
 template-generation prompt only ever writes the message paragraphs, never the
 header/footer, so branding can't drift between templates or get mangled by a
 model. Edit `TEMPLATE_SKELETON` there to change the look (and its hand-mirror
 in `scripts/bootstrap-sheets.mjs`'s seed — see the comment on `templateHtml`
-for why it's duplicated). The three contact fields are ordinary Config
-values, editable in **Settings** exactly like `company_name`.
+for why it's duplicated). The contact fields are ordinary Config values,
+editable in **Settings** exactly like `company_name`.
+
+**Using the real logo.** Templates ship with a text wordmark and switch to an
+image once one exists:
+
+1. Save the logo as `dashboard/public/brand/logo.png` (300–600px wide; it
+   renders at 150px).
+2. Set `company_logo_url` on the **Settings** page to
+   `https://<your-dashboard-domain>/brand/logo.png`.
+3. Generate a template — it uses the image. To rebrand the seed template too,
+   re-run `npm run bootstrap:sheets -- --seed-demo` with `COMPANY_LOGO_URL`
+   set, or paste the `<img>` into the existing row.
+
+`/brand/*` is deliberately outside the session gate in `middleware.ts` —
+mail clients fetch images anonymously, and a login-gated URL reaches
+candidates as a broken image. The URL is baked in when a template is
+generated rather than left as a merge field: an empty merge field counts as
+unresolved and would block the send outright.
 
 Hand-written templates (uploaded or typed directly into the Templates tab)
 are untouched — the skeleton only wraps the seed template and new AI drafts,

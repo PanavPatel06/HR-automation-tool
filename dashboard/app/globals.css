@@ -293,21 +293,26 @@ h3 { font-size: 13.5px; font-weight: 630; letter-spacing: -0.005em; }
 }
 .table-wrap::-webkit-scrollbar { height: 8px; }
 .table-wrap::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--radius-pill); }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th {
+/* Scoped to .table-wrap on purpose. Every data table in the app is inside
+   one, and email previews (.preview / .bubble) are tables too — unscoped,
+   these rules repainted a candidate's email with our cell borders, our 13px
+   type, and a row-hover tint that made the message change colour under the
+   cursor. Foreign markup keeps its own styles. */
+.table-wrap table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table-wrap th {
   text-align: left; font-weight: 630; font-size: 10.5px; letter-spacing: 0.05em;
   text-transform: uppercase; color: var(--fg-subtle);
   padding: 10px 12px; border-bottom: 1px solid var(--border);
   background: var(--panel-2); white-space: nowrap; position: sticky; top: 0;
 }
-td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
-tr:last-child td { border-bottom: 0; }
-tr { transition: background-color var(--duration) var(--ease); }
-tr.row-failed td { background: var(--danger-bg); }
-tr.row-blocked td { background: var(--warn-bg); }
-tr.selected td { background: var(--purple-soft); }
-tbody tr:not(.row-failed):not(.row-blocked):not(.selected):hover td { background: var(--panel-2); }
-td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.table-wrap td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.table-wrap tr:last-child td { border-bottom: 0; }
+.table-wrap tr { transition: background-color var(--duration) var(--ease); }
+.table-wrap tr.row-failed td { background: var(--danger-bg); }
+.table-wrap tr.row-blocked td { background: var(--warn-bg); }
+.table-wrap tr.selected td { background: var(--purple-soft); }
+.table-wrap tbody tr:not(.row-failed):not(.row-blocked):not(.selected):hover td { background: var(--panel-2); }
+.table-wrap td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .mono { font-family: var(--mono); font-size: 12px; }
 .truncate { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

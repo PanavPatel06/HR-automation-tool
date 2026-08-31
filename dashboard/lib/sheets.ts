@@ -156,12 +156,13 @@ function buildDemoStore(): Record<TabName, Row[]> {
       { key: 'max_resume_mb', value: '10', type: 'number', description: 'Reject resumes larger than this.', updated_at: ago(30 * DAY) },
       { key: 'reply_confidence_min', value: '0.7', type: 'number', description: 'Below this, a reply is flagged needs_human.', updated_at: ago(30 * DAY) },
       { key: 'send_daily_cap', value: '400', type: 'number', description: 'Self-imposed cap, kept under the Gmail ~500/day ceiling.', updated_at: ago(30 * DAY) },
-      { key: 'company_name', value: 'Your Company', type: 'string', description: 'Merge field {{company_name}}.', updated_at: ago(30 * DAY) },
+      { key: 'company_name', value: '3Space', type: 'string', description: 'Merge field {{company_name}}. Appears in subjects and the template footer.', updated_at: ago(30 * DAY) },
       { key: 'hr_name', value: 'HR Team', type: 'string', description: 'Merge field {{hr_name}}.', updated_at: ago(30 * DAY) },
       { key: 'hr_signature', value: 'Best regards,<br>HR Team', type: 'string', description: 'Merge field {{hr_signature}}. HTML allowed.', updated_at: ago(30 * DAY) },
       { key: 'company_email', value: '3spacetechcorp@gmail.com', type: 'string', description: 'Merge field {{company_email}} — shown in the branded template header.', updated_at: ago(30 * DAY) },
       { key: 'company_phone', value: 'Tel: +91 63519 32850<br>+91 87809 97391', type: 'string', description: 'Merge field {{company_phone}}. HTML allowed.', updated_at: ago(30 * DAY) },
       { key: 'company_incubator', value: 'Incubated at<br>PDEU IIC, Gandhinagar', type: 'string', description: 'Merge field {{company_incubator}}. HTML allowed.', updated_at: ago(30 * DAY) },
+      { key: 'company_logo_url', value: '', type: 'string', description: 'Public image URL for the logo in generated templates. Blank uses the text wordmark. Must load without a login — mail clients fetch it anonymously.', updated_at: ago(30 * DAY) },
     ]); })(),
   } as Record<TabName, Row[]>;
 

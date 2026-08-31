@@ -10,7 +10,10 @@ import { NextResponse, type NextRequest } from 'next/server';
  */
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  if (pathname.startsWith('/login') || pathname.startsWith('/api/login') || pathname.startsWith('/_next')) {
+  // /brand/* is deliberately public: it holds the logo the email templates
+  // point at, and mail clients fetch that anonymously — behind the session
+  // gate it would reach candidates as a broken image. Put nothing else there.
+  if (pathname.startsWith('/login') || pathname.startsWith('/api/login') || pathname.startsWith('/_next') || pathname.startsWith('/brand/')) {
     return NextResponse.next();
   }
   if (!req.cookies.get('hr_session')) {
