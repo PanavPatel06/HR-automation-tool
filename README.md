@@ -304,7 +304,61 @@ Work through this in order against your deployed URL.
 If any step fails, the code on the Console page names the cause. See
 [Runbook](#runbook), organised by symptom.
 
-### 4. Shipping a change
+### 4. Going live
+
+Everything above gets the app *running*. This is the sequence that makes it
+safe to point at real candidates. Each step is cheap to undo until the last
+one.
+
+**1. Set the identity.** Settings page — these are what candidates actually
+read, and the defaults are placeholders:
+
+| Key | Where it shows up |
+|---|---|
+| `company_name` | Every subject line, and the email footer |
+| `hr_name`, `hr_signature` | The sign-off at the bottom of the message |
+| `company_email`, `company_phone`, `company_incubator` | The letterhead block at the top of every template |
+| `categories` | The dropdown HR sorts candidates with |
+| `batch_size` | How many applicants one **Generate drafts** click processes |
+| `send_daily_cap` | Keep it under Gmail's ~500/day. 400 by default |
+
+**2. Fill JobRoles.** Nothing matches a template without it — `job_role` on an
+applicant is matched against `title` here, and a role with no match falls back
+to the default template and records a `W-TEMPLATE-DEFAULT` warning.
+
+**3. Review the templates.** Read the seeded default end to end, then add
+role-specific ones. Exactly one template should have `is_default = TRUE`, and
+every template you intend to use needs `is_active = TRUE`. Remember
+`{{ai_body}}` is the cost switch: with it, each draft spends model quota;
+without it, drafting is free and deterministic.
+
+**4. Rehearse with dry run ON.** Add two test rows to Applicants using
+addresses you own, then **Generate drafts → Approve → Dry-run send**. Check
+the EmailLog tab: you want rows with `dry_run = TRUE` and no mail anywhere.
+This exercises the whole pipeline — template matching, merge fields, the
+approval gate — with the send physically disabled.
+
+**5. Go live.** Settings → turn *Sending* on, then **Go live** (that is the
+`dry_run` switch). The toolbar button turns red and reads **Send**; the banner
+turns into a warning. Nothing else changes.
+
+**6. Send one real email to yourself first.** Confirm it arrives, the logo
+loads (mail clients hide images until you allow them), the signature is right,
+and `thread_id` / `message_id` get written back to the row. Then start on real
+candidates.
+
+**Two limits to know before you rely on it:**
+
+- **Replying from the Inbox does not write to a real sheet yet.** The
+  per-candidate **Send** in the thread view answers `E-NOT-IMPLEMENTED` in
+  real-Sheets mode — only the bulk **Generate drafts → Approve → Send**
+  pipeline sends for real. Reading a candidate's Gmail thread, loading a
+  template into the box, and AI drafting all work; it is the final write that
+  is still demo-only.
+- **Sign-in is a single shared password.** `approved_by` therefore records
+  `dashboard`, not a person. Fine for a small team, not an audit trail.
+
+### 5. Shipping a change
 
 Push to `main` and Render rebuilds. One extra step, only when a release adds
 a sheet column:
@@ -319,7 +373,7 @@ columns don't match the contract — that's `E-SHEET-SCHEMA`, and it fails
 *every* read of that tab, not just the new feature. Run the check after
 pulling and the deploy stays boring.
 
-### 5. Keeping it running
+### 6. Keeping it running
 
 **Backups.** The spreadsheet is the data, and Google versions it
 automatically. Also back up the service-account JSON and your `.env`/env-var
@@ -340,6 +394,99 @@ uses.
 | Gmail sending | $0 (~500/day) |
 
 ---
+
+## The spreadsheet
+
+Build it with `npm run bootstrap:sheets`, never by hand. The dashboard refuses
+to read a tab whose headers don't match the contract in `lib/schema.js` — that
+refusal is `E-SHEET-SCHEMA`, and it fails *every* read of that tab, not just
+the feature that needed the new column. The script creates all nine tabs with
+exact headers and seeds the Config defaults, and re-running it only ever
+appends what's missing.
+
+### What each tab is for
+
+| Tab | Written by | Holds |
+|---|---|---|
+| **Applicants** | you + the app | One row per candidate. The only tab you routinely type into. |
+| **Templates** | you + the app | The email shells. The app appends AI-generated ones and flips `is_active` / attachment fields. |
+| **JobRoles** | **you only** | The open roles. Template matching reads `title` from here. |
+| **Config** | you (via Settings) | Every runtime switch and merge-field value. |
+| **EmailLog** | app only | One row per send attempt, real or dry-run. Your audit trail. |
+| **Replies** | app only (marks handled) | Candidate replies, when something populates them. |
+| **Errors** | app only (marks resolved) | What the Console page reads. |
+| **RunLog**, **Quota** | nothing | Vestigial — from the earlier workflow-engine design. Leave them; they cost nothing and removing them means a schema change. |
+
+### The columns you fill in
+
+On **Applicants**, a row only appears on the dashboard once it has an
+`applicant_id` and a `stage`. The minimum viable row:
+
+| Column | Value |
+|---|---|
+| `applicant_id` | Any unique string — `APP-1001`, a form timestamp, anything |
+| `name`, `email` | The candidate. `email` is also what Gmail sync searches by |
+| `job_role` | Must match a `title` in JobRoles |
+| `category` | One of `categories` from Config |
+| `stage` | `NEW` |
+| `status` | `ok` |
+
+Everything else — `template_id`, `email_subject`, `email_html`, `sent_at`,
+`thread_id`, `message_id`, `approved_by`, `error_*`, `updated_at` — is written
+by the app. Don't type into those; you'll be overwritten.
+
+### Getting candidates in
+
+There is no automated intake. Three options, in increasing order of effort:
+
+1. **Type them in.** Fine for a handful.
+2. **A Google Form on the same spreadsheet.** Form responses land in their own
+   `Form Responses 1` tab, *not* in Applicants — the Form owns that tab's
+   columns, so it can't be pointed at Applicants directly. Bridge it with a
+   short Apps Script `onFormSubmit` trigger that appends a properly shaped row
+   (`applicant_id`, `stage = NEW`, `status = ok`) to Applicants.
+3. **Paste in bulk** from a CSV, then fill `applicant_id` / `stage` / `status`
+   down the column.
+
+### Making it pleasant to work in
+
+None of this is required — it's what stops a shared sheet rotting:
+
+- **Freeze row 1** (View → Freeze → 1 row) on every tab.
+- **Protect the header row** (right-click → Protect range) so nobody renames a
+  column and takes the dashboard down with it. This is the single highest-value
+  thing on this list.
+- **Data validation** on `Applicants.stage` (`NEW, DRAFTED, APPROVED, SENT,
+  REPLIED, CLOSED, FAILED`), `status` (`ok, pending, failed, blocked`), and
+  `category` (whatever you set in Config). Typos here are invisible until a
+  draft silently doesn't happen.
+- **Conditional formatting** on `stage` so the pipeline is readable at a glance.
+- **Filter views** rather than filters — a filter view is per-person, so two
+  people looking at once don't fight over the sort order.
+- **Archive** `SENT` / `CLOSED` rows to a separate sheet once a quarter. Every
+  dashboard page reads the whole tab, so a few thousand rows is where it starts
+  feeling slow.
+- **Version history** is your backup (File → Version history). The sheet *is*
+  the database; also keep the service-account JSON somewhere safe and separate.
+
+### Getting the most out of template matching
+
+`selectTemplate()` scores every active template and the most specific one wins:
+
+| Template has | Score |
+|---|---|
+| `job_role` matches the candidate | +4 |
+| `job_role` set but **doesn't** match | −10 (disqualifying) |
+| `category` matches | +2 |
+| `category` set but doesn't match | −5 |
+| `is_default = TRUE` | +1 |
+
+`stage` on a template filters before scoring (`outreach` is the default). So:
+leave `job_role`/`category` blank for a catch-all, fill them in for a
+specialised one, and keep exactly one default as the safety net. A candidate
+whose role matches nothing gets the default plus a `W-TEMPLATE-DEFAULT`
+warning in the result banner — that warning is your signal to write a
+role-specific template.
 
 ## Everyday use
 
@@ -907,6 +1054,14 @@ file. What's left as its own doc:
 - **Reply classification and follow-up flagging are manual.** Open the Inbox
   to read what a candidate said; nothing auto-classifies intent or flags a
   silent candidate for you.
+- **Sending an ad-hoc reply from a candidate's thread is demo-mode only.**
+  Against a real spreadsheet the per-candidate **Send** answers
+  `E-NOT-IMPLEMENTED`: its Sheets write path was never wired up. Everything
+  around it works in production — syncing the real Gmail thread, loading a
+  template into the box, AI drafting — and the bulk **Generate drafts →
+  Approve → Send** pipeline sends for real. Wiring the ad-hoc write is a small
+  job (`patchRows`/`appendRow` already work against real Sheets); it needs
+  testing against a live sheet before the guard comes off.
 - **Dashboard auth is a shared team password**, not per-user sign-in. It
   authenticates the team, so `approved_by` records `dashboard` rather than a
   person. Upgrade path in [dashboard/README.md](dashboard/README.md).
