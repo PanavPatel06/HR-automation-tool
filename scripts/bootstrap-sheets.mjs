@@ -168,10 +168,31 @@ if (SEED && !CHECK) {
     requestBody: { values: roles },
   }), 'seeding JobRoles');
 
+  // The branded shell (logo, contact header, footer) — mirrors
+  // renderSkeleton()/TEMPLATE_SKELETON in dashboard/lib/template.ts. Can't
+  // import that file directly: it's TypeScript marked 'server-only', and this
+  // script runs as plain Node outside the dashboard's Next.js build, same
+  // reason dashboard/lib/contract.ts mirrors lib/schema.js by hand.
   const templateHtml = [
-    '<p>Hi {{first_name}},</p>',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f3f1;padding:32px 0;font-family:Arial,Helvetica,sans-serif;">',
+    '<tr><td align="center">',
+    '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:10px;">',
+    '<tr><td style="padding:32px 36px 18px 36px;">',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>',
+    '<td style="font-size:24px;font-weight:700;letter-spacing:1px;color:#1a1a1a;"><span style="color:#6d4fe0;">3</span>SPACE</td>',
+    '<td align="right" style="font-size:11px;line-height:1.7;color:#87837a;">{{company_email}}<br>{{company_phone}}<br>{{company_incubator}}</td>',
+    '</tr></table>',
+    '</td></tr>',
+    '<tr><td style="padding:0 36px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="border-top:2px solid #6d4fe0;font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr>',
+    '<tr><td style="padding:30px 36px;font-size:15px;line-height:1.65;color:#1a1a1a;">',
+    '<p style="margin:0 0 16px;">Hi {{first_name}},</p>',
     '{{ai_body}}',
-    '<p>{{hr_signature}}</p>',
+    '<p style="margin:24px 0 0;">{{hr_signature}}</p>',
+    '</td></tr>',
+    '<tr><td style="padding:18px 36px 30px;border-top:1px solid #ece9e4;font-size:11px;color:#a5a196;">{{company_name}} &middot; {{company_incubator}}</td></tr>',
+    '</table>',
+    '</td></tr>',
+    '</table>',
   ].join('\n');
   await api(() => sheets.spreadsheets.values.append({
     spreadsheetId: SHEET_ID, range: 'Templates!A:O', valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS',

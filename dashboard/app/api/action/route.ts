@@ -3,7 +3,7 @@ import { revalidatePath } from 'next/cache';
 import { requireSession } from '../../../lib/auth';
 import { readTab, patchRows, appendRow, setConfig, isDemoMode, parseConfig, SheetsError, type Patch } from '../../../lib/sheets';
 import { groqJson, GroqError } from '../../../lib/groq';
-import { buildMergeContext, render, validateHtml, selectTemplate, renderEmail, TemplateError, FIELD_RE } from '../../../lib/template';
+import { buildMergeContext, render, validateHtml, selectTemplate, renderEmail, renderSkeleton, DEFAULT_TEMPLATE_BODY, TemplateError, FIELD_RE } from '../../../lib/template';
 import { selectForDrafting, usesAi, buildDraftPrompt, checkDraftSchema, assembleDraft } from '../../../lib/draft';
 import { findMessagesForAddress, sendMail, fetchUrlAttachment, isGmailConfigured, GmailError, MAX_ATTACHMENTS_BYTES, type OutgoingAttachment } from '../../../lib/gmail';
 import { ACTIONABLE } from '../../../lib/contract';
@@ -45,22 +45,26 @@ export async function POST(req: Request) {
       const notes = String(body.notes ?? '').trim().slice(0, 500);
 
       const prompt = [
-        `Write a recruiting email template for ${jobRole || 'any role'} candidates.`,
+        `Write the body of a recruiting email template for ${jobRole || 'any role'} candidates.`,
         `Purpose: ${purpose}. Tone: ${tone}.`,
         notes ? `Extra instructions: ${notes}.` : '',
         'Return JSON only: {"subject": string, "html": string}.',
         'The html MUST include the literal placeholders {{first_name}}, {{job_role}}, {{company_name}}, {{ai_body}}, and {{hr_signature}} somewhere appropriate.',
+        'html is just the message body — a few short <p> paragraphs plus those placeholders. No <html>, <head>, <body>, header, logo, or company contact details: those are added automatically around whatever you return.',
         'Keep it concise. Do not invent facts, dates, compensation, or promises.',
       ].filter(Boolean).join(' ');
 
       const generated = await groqJson(prompt) as { subject?: string; html?: string };
       const now = new Date().toISOString();
+      // Every template — hand-written seed or AI-generated — shares the same
+      // branded shell (logo, contact header, footer); only this inner
+      // message fragment differs. See renderSkeleton() in lib/template.ts.
       const created = await appendRow('Templates', {
         template_id: `TPL-AI-${Date.now().toString(36).toUpperCase()}`,
         name: `AI draft — ${jobRole || 'any role'}`,
         job_role: jobRole,
         subject: generated.subject || `Your application for ${jobRole || 'the role'}`,
-        html: generated.html || '<p>Hi {{first_name}},</p>\n{{ai_body}}\n<p>{{hr_signature}}</p>',
+        html: renderSkeleton(generated.html || DEFAULT_TEMPLATE_BODY),
         source: 'ai',
         is_active: 'FALSE',
         is_default: 'FALSE',

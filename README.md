@@ -346,11 +346,34 @@ daily token budget is the real constraint, this is how you decide where
 personalisation is worth spending it.
 
 Available fields: `first_name` `name` `email` `job_role` `category`
-`company_name` `hr_name` `hr_signature` `ai_body`.
+`company_name` `hr_name` `hr_signature` `ai_body` `company_email`
+`company_phone` `company_incubator`.
 
 An email with an unresolved `{{field}}` is **never sent** — it fails as
 `E-MAIL-TEMPLATE` first. `Hi {{first_name}},` reaching a candidate is worse than
 a visible error.
+
+### The branded skeleton
+
+Every template — the seed default and every AI-generated one — is wrapped in
+the same branded shell: the 3Space wordmark and a contact header
+(`{{company_email}}` / `{{company_phone}}` / `{{company_incubator}}`) at the
+top, an accent rule, then the message, then a small footer credit. It's
+table-based with every style inline rather than a `<style>` block, which is
+the only markup that renders identically in Gmail, Outlook, and everything
+else.
+
+`renderSkeleton()` in `dashboard/lib/template.ts` does the wrapping — the AI
+template-generation prompt only ever writes the message paragraphs, never the
+header/footer, so branding can't drift between templates or get mangled by a
+model. Edit `TEMPLATE_SKELETON` there to change the look (and its hand-mirror
+in `scripts/bootstrap-sheets.mjs`'s seed — see the comment on `templateHtml`
+for why it's duplicated). The three contact fields are ordinary Config
+values, editable in **Settings** exactly like `company_name`.
+
+Hand-written templates (uploaded or typed directly into the Templates tab)
+are untouched — the skeleton only wraps the seed template and new AI drafts,
+so nothing rewrites HTML a person already reviewed and activated.
 
 ### Attaching a file to a template
 

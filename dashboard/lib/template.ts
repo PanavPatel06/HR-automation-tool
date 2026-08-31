@@ -63,6 +63,10 @@ export function buildMergeContext(applicant: Record<string, string>, config: Rec
     company_name: String(config.company_name ?? ''),
     hr_name: String(config.hr_name ?? ''),
     hr_signature: String(config.hr_signature ?? ''),
+    // The branded skeleton's header/footer block — see renderSkeleton() below.
+    company_email: String(config.company_email ?? ''),
+    company_phone: String(config.company_phone ?? ''),
+    company_incubator: String(config.company_incubator ?? ''),
   };
 }
 
@@ -76,7 +80,7 @@ export function buildMergeContext(applicant: Record<string, string>, config: Rec
 export function render(
   template: string,
   context: MergeContext,
-  { escape = true, allowHtmlFields = ['hr_signature'] }: { escape?: boolean; allowHtmlFields?: string[] } = {}
+  { escape = true, allowHtmlFields = ['hr_signature', 'company_phone', 'company_incubator'] }: { escape?: boolean; allowHtmlFields?: string[] } = {}
 ): { html: string; unresolved: string[]; used: string[] } {
   const src = String(template == null ? '' : template);
   const used: string[] = [];
@@ -139,6 +143,48 @@ function truthy(v: unknown): boolean {
   return ['true', 'yes', '1', 'y', 'x'].includes(String(v ?? '').trim().toLowerCase());
 }
 
+/**
+ * The branded email shell every template starts from — logo mark, contact
+ * header, and a footer credit, matching 3Space's letterhead. `%%BODY%%` is
+ * where the message itself goes; renderSkeleton() below fills it in.
+ *
+ * Table-based with every style inline, not a `<style>` block or `<div>`
+ * layout — the only markup that renders identically across Gmail, Outlook,
+ * and every other mail client. `#6d4fe0` mirrors the dashboard's own brand
+ * accent (`--purple` in app/globals.css), so the email and the app match.
+ */
+const TEMPLATE_SKELETON = [
+  '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f3f1;padding:32px 0;font-family:Arial,Helvetica,sans-serif;">',
+  '<tr><td align="center">',
+  '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:10px;">',
+  '<tr><td style="padding:32px 36px 18px 36px;">',
+  '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>',
+  '<td style="font-size:24px;font-weight:700;letter-spacing:1px;color:#1a1a1a;"><span style="color:#6d4fe0;">3</span>SPACE</td>',
+  '<td align="right" style="font-size:11px;line-height:1.7;color:#87837a;">{{company_email}}<br>{{company_phone}}<br>{{company_incubator}}</td>',
+  '</tr></table>',
+  '</td></tr>',
+  '<tr><td style="padding:0 36px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="border-top:2px solid #6d4fe0;font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr>',
+  '<tr><td style="padding:30px 36px;font-size:15px;line-height:1.65;color:#1a1a1a;">',
+  '%%BODY%%',
+  '</td></tr>',
+  '<tr><td style="padding:18px 36px 30px;border-top:1px solid #ece9e4;font-size:11px;color:#a5a196;">{{company_name}} &middot; {{company_incubator}}</td></tr>',
+  '</table>',
+  '</td></tr>',
+  '</table>',
+].join('\n');
+
+/** The default seed template's message — plugged into TEMPLATE_SKELETON's %%BODY%% slot. */
+export const DEFAULT_TEMPLATE_BODY = [
+  '<p style="margin:0 0 16px;">Hi {{first_name}},</p>',
+  '{{ai_body}}',
+  '<p style="margin:24px 0 0;">{{hr_signature}}</p>',
+].join('\n');
+
+/** Slot a message fragment into the branded skeleton. Used for the default seed template and every AI-generated one, so both look identical. */
+export function renderSkeleton(bodyHtml: string): string {
+  return TEMPLATE_SKELETON.replace('%%BODY%%', bodyHtml);
+}
+
 export type TemplateRow = Record<string, string>;
 
 /**
@@ -195,7 +241,7 @@ export function renderEmail({
   template: TemplateRow; applicant: Record<string, string>; config: Record<string, unknown>; extras?: Record<string, string>;
 }): { subject: string; html: string; template_id: string } {
   const ctx = { ...buildMergeContext(applicant, config), ...extras };
-  const allowHtmlFields = ['hr_signature', ...Object.keys(extras)];
+  const allowHtmlFields = ['hr_signature', 'company_phone', 'company_incubator', ...Object.keys(extras)];
   const subject = render(template.subject || '', ctx, { escape: false });
   const body = render(template.html || '', ctx, { escape: true, allowHtmlFields });
 

@@ -1,6 +1,7 @@
 import 'server-only';
 import { google } from 'googleapis';
 import { TABS, type TabName, type Row } from './contract';
+import { renderSkeleton, DEFAULT_TEMPLATE_BODY } from './template';
 
 /**
  * Read/write access to the spreadsheet.
@@ -101,9 +102,9 @@ function buildDemoStore(): Record<TabName, Row[]> {
     ]); })(),
 
     Templates: (() => { n = 0; return rows('Templates', [
-      { template_id: 'TPL-DEFAULT', name: 'Default outreach', subject: 'Your application for {{job_role}} at {{company_name}}', html: '<p>Hi {{first_name}},</p>\n{{ai_body}}\n<p>{{hr_signature}}</p>', source: 'seed', is_active: 'TRUE', is_default: 'TRUE', prompt_version: 'seed.v1', created_at: ago(30 * DAY), updated_at: ago(30 * DAY) },
-      { template_id: 'TPL-FE-STATIC', name: 'Frontend follow-up (static)', job_role: 'Frontend Engineer', subject: 'Next steps for your Frontend Engineer application', html: '<p>Hi {{first_name}},</p><p>Thanks for your interest in the Frontend Engineer role. We will follow up within a week.</p><p>{{hr_signature}}</p>', source: 'manual', is_active: 'TRUE', is_default: 'FALSE', created_at: ago(20 * DAY), updated_at: ago(20 * DAY) },
-      { template_id: 'TPL-AI-DRAFT', name: 'AI draft — Designer outreach', job_role: 'Product Designer', subject: 'Your Product Designer application at {{company_name}}', html: '<p>Hi {{first_name}},</p>\n{{ai_body}}\n<p>{{hr_signature}}</p>', source: 'ai', is_active: 'FALSE', is_default: 'FALSE', prompt_version: 'template-gen.v1', created_at: ago(2 * HOUR), updated_at: ago(2 * HOUR) },
+      { template_id: 'TPL-DEFAULT', name: 'Default outreach', subject: 'Your application for {{job_role}} at {{company_name}}', html: renderSkeleton(DEFAULT_TEMPLATE_BODY), source: 'seed', is_active: 'TRUE', is_default: 'TRUE', prompt_version: 'seed.v1', created_at: ago(30 * DAY), updated_at: ago(30 * DAY) },
+      { template_id: 'TPL-FE-STATIC', name: 'Frontend follow-up (static)', job_role: 'Frontend Engineer', subject: 'Next steps for your Frontend Engineer application', html: renderSkeleton('<p style="margin:0 0 16px;">Hi {{first_name}},</p><p style="margin:0;">Thanks for your interest in the Frontend Engineer role. We will follow up within a week.</p><p style="margin:24px 0 0;">{{hr_signature}}</p>'), source: 'manual', is_active: 'TRUE', is_default: 'FALSE', created_at: ago(20 * DAY), updated_at: ago(20 * DAY) },
+      { template_id: 'TPL-AI-DRAFT', name: 'AI draft — Designer outreach', job_role: 'Product Designer', subject: 'Your Product Designer application at {{company_name}}', html: renderSkeleton(DEFAULT_TEMPLATE_BODY), source: 'ai', is_active: 'FALSE', is_default: 'FALSE', prompt_version: 'template-gen.v1', created_at: ago(2 * HOUR), updated_at: ago(2 * HOUR) },
     ]); })(),
 
     JobRoles: (() => { n = 0; return rows('JobRoles', [
@@ -158,6 +159,9 @@ function buildDemoStore(): Record<TabName, Row[]> {
       { key: 'company_name', value: 'Your Company', type: 'string', description: 'Merge field {{company_name}}.', updated_at: ago(30 * DAY) },
       { key: 'hr_name', value: 'HR Team', type: 'string', description: 'Merge field {{hr_name}}.', updated_at: ago(30 * DAY) },
       { key: 'hr_signature', value: 'Best regards,<br>HR Team', type: 'string', description: 'Merge field {{hr_signature}}. HTML allowed.', updated_at: ago(30 * DAY) },
+      { key: 'company_email', value: '3spacetechcorp@gmail.com', type: 'string', description: 'Merge field {{company_email}} — shown in the branded template header.', updated_at: ago(30 * DAY) },
+      { key: 'company_phone', value: 'Tel: +91 63519 32850<br>+91 87809 97391', type: 'string', description: 'Merge field {{company_phone}}. HTML allowed.', updated_at: ago(30 * DAY) },
+      { key: 'company_incubator', value: 'Incubated at<br>PDEU IIC, Gandhinagar', type: 'string', description: 'Merge field {{company_incubator}}. HTML allowed.', updated_at: ago(30 * DAY) },
     ]); })(),
   } as Record<TabName, Row[]>;
 
