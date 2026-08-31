@@ -208,16 +208,23 @@ export async function POST(req: Request) {
         template ? `Match the tone of this existing template as a style reference only — do not copy its literal {{placeholders}}: subject "${template.subject}", body "${template.html}".` : '',
         instructions ? `Extra instructions from HR: ${instructions}.` : '',
         'Return JSON only: {"subject": string, "html": string}. The html should be simple, email-safe markup (p, br, a, strong, em, ul/li) — no <script> or <iframe>.',
+        'html is the message body only: greeting, a few short paragraphs, sign-off. No <html>, <head>, <body>, no logo, header, or company contact block — those are added automatically around whatever you return.',
         'Do not invent facts, dates, compensation, interview times, or promises beyond what is given above.',
       ].filter(Boolean).join(' ');
 
       const generated = await groqJson(prompt, { maxTokens: 900 }) as { subject?: string; html?: string };
 
-      // Defense in depth: run the model's output back through the same merge
-      // gate a template goes through, in case it echoed a literal
-      // {{placeholder}} back instead of the real value.
+      // The model writes the message only; the branded shell goes around it
+      // here, so an AI reply leaves the building looking like every other
+      // email — same logo, header and footer a stored template gives you.
+      // Wrapping before the merge pass means the skeleton's own
+      // {{company_*}} fields resolve in the same render.
+      //
+      // Defense in depth: running the model's output through that same merge
+      // gate also catches it echoing a literal {{placeholder}} back instead
+      // of the real value.
       const subjectR = render(generated.subject || '', ctx, { escape: false });
-      const bodyR = render(generated.html || '', ctx, { escape: true });
+      const bodyR = render(renderSkeleton(generated.html || ''), ctx, { escape: true });
       const unresolved = [...new Set([...subjectR.unresolved, ...bodyR.unresolved])];
       const structure = validateHtml(bodyR.html);
 

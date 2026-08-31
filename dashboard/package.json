@@ -2,6 +2,9 @@
   "name": "hr-automation-dashboard",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "unset GROQ_API_KEY; next dev -p 3000",
     "build": "next build",

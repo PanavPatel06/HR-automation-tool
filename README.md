@@ -202,7 +202,8 @@ npm run seed:demo          # optional but recommended for a first run
 You should see the 9 tabs created with headers and Config defaults. Re-run any
 time — it never overwrites existing values.
 
-Verify at any point with `npm run bootstrap:sheets -- --check`.
+Verify at any point with `npm run check:sheets`, which reports drift and
+changes nothing.
 
 #### 1.5 The sending mailbox
 
@@ -255,10 +256,16 @@ thing from a **Blueprint** without any manual service configuration:
    and creates one free web service rooted at `dashboard/`.
 3. It will prompt for the env vars marked `sync: false` in `render.yaml` —
    paste in the same values as `.env.local` above (`GOOGLE_SERVICE_ACCOUNT_JSON`
-   pastes as raw JSON, no extra quoting needed).
+   pastes as raw JSON, no extra quoting needed). Blanks are fine for the ones
+   marked optional there.
 4. **Apply** — it builds with `npm install && npm run build` and starts with
    `next start -p $PORT` (Render assigns the port; the blueprint already
    passes it through).
+
+The blueprint pins **`branch: main`**, so a push to `main` is what deploys —
+work on a branch, merge, and the deploy follows. It also sets
+`healthCheckPath: /login`, because `/` answers 307 (redirect to sign-in) when
+signed out and Render would read that as unhealthy.
 
 Free-tier Render services **spin down after ~15 minutes idle** and take a
 few seconds to wake on the next request — fine here, since every action in
@@ -274,7 +281,8 @@ Service** → same repo → **Root Directory: `dashboard`** → **Build Command:
 
 1. Import the repo at [vercel.com/new](https://vercel.com/new).
 2. **Root Directory → `dashboard`.** Without this the build fails.
-3. Add the same five environment variables under **Settings → Environment Variables**.
+3. Add the same environment variables (from `dashboard/.env.example`) under
+   **Settings → Environment Variables**.
 4. Deploy.
 
 For `GOOGLE_SERVICE_ACCOUNT_JSON` paste the file contents directly into the
@@ -296,7 +304,22 @@ Work through this in order against your deployed URL.
 If any step fails, the code on the Console page names the cause. See
 [Runbook](#runbook), organised by symptom.
 
-### 4. Keeping it running
+### 4. Shipping a change
+
+Push to `main` and Render rebuilds. One extra step, only when a release adds
+a sheet column:
+
+```bash
+npm run check:sheets        # names any column the sheet is missing
+npm run bootstrap:sheets    # appends them; never touches existing values
+```
+
+The sheet is the database, and the dashboard refuses to read a tab whose
+columns don't match the contract — that's `E-SHEET-SCHEMA`, and it fails
+*every* read of that tab, not just the new feature. Run the check after
+pulling and the deploy stays boring.
+
+### 5. Keeping it running
 
 **Backups.** The spreadsheet is the data, and Google versions it
 automatically. Also back up the service-account JSON and your `.env`/env-var

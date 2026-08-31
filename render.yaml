@@ -1,26 +1,42 @@
+# Render blueprint. New Blueprint Instance -> pick this repo -> Render reads
+# this file, creates the one service below, and prompts for each `sync: false`
+# secret. Nothing else to configure.
+#
+# Not listed here because Render sets it itself: RENDER_EXTERNAL_URL, which is
+# how the email templates find the logo (resolveLogoUrl in
+# dashboard/lib/template.ts). Set COMPANY_LOGO_BASE_URL only if the logo should
+# be served from somewhere other than this service.
 services:
   - type: web
     name: hr-automation-dashboard
     runtime: node
     plan: free
+    branch: main
     rootDir: dashboard
     buildCommand: npm install && npm run build
     startCommand: npm start -- -p $PORT
+    # `/` answers 307 (redirect to the login page) when signed out, which reads
+    # as unhealthy. /login is public and answers 200.
+    healthCheckPath: /login
     envVars:
       - key: NODE_VERSION
-        value: 20
+        value: 22
+      # --- required ---
       - key: DASHBOARD_PASSWORD
         sync: false
       - key: SESSION_SECRET
         sync: false
+      # --- Google Sheets: leave both blank to deploy in demo mode ---
       - key: SHEET_ID
         sync: false
       - key: GOOGLE_SERVICE_ACCOUNT_JSON
         sync: false
+      # --- AI: needed for Draft, template generation and AI replies ---
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_MODEL
         sync: false
+      # --- Gmail: optional. Blank keeps sending logged-only ---
       - key: GMAIL_CLIENT_ID
         sync: false
       - key: GMAIL_CLIENT_SECRET

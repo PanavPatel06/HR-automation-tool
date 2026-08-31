@@ -33,22 +33,37 @@ const die = (msg, fix) => {
   process.exit(1);
 };
 
-// Load .env from the repo root if present, so this works without extra tooling.
-const envFile = join(ROOT, '.env');
-if (existsSync(envFile)) {
+// Env, without a dotenv dependency. dashboard/.env.local is read too, so one
+// file covers both the dashboard and these scripts — a root .env is optional
+// and wins where the two overlap. Real environment variables beat both.
+for (const envFile of [join(ROOT, '.env'), join(ROOT, '.env.local'), join(ROOT, 'dashboard', '.env.local')]) {
+  if (!existsSync(envFile)) continue;
   for (const line of readFileSync(envFile, 'utf8').split('\n')) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
     if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
   }
 }
 
 const SHEET_ID = process.env.SHEET_ID;
-if (!SHEET_ID) die('SHEET_ID is not set.', 'Add SHEET_ID to .env — it is the id in the spreadsheet URL, between /d/ and /edit.');
+if (!SHEET_ID) die('SHEET_ID is not set.', 'Add SHEET_ID to dashboard/.env.local — it is the id in the spreadsheet URL, between /d/ and /edit.');
 
-const CREDS = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-if (!CREDS || !existsSync(CREDS)) {
-  die('GOOGLE_APPLICATION_CREDENTIALS does not point at a readable file.',
-      'Download the service-account JSON key and set GOOGLE_APPLICATION_CREDENTIALS to its absolute path. See README.md § Deployment, step 1.');
+// Either form of the same credential: the key file on disk, or its contents
+// inline (which is what the deployed dashboard uses, so most people already
+// have it in dashboard/.env.local).
+let credentials;
+const CREDS_PATH = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+const CREDS_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+if (CREDS_PATH && existsSync(CREDS_PATH)) {
+  credentials = JSON.parse(readFileSync(CREDS_PATH, 'utf8'));
+} else if (CREDS_JSON) {
+  try {
+    credentials = JSON.parse(CREDS_JSON);
+  } catch {
+    die('GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON.', 'Paste the whole key file on one line, in single quotes.');
+  }
+} else {
+  die('No service-account credentials found.',
+      'Set GOOGLE_SERVICE_ACCOUNT_JSON in dashboard/.env.local (the whole key file on one line, in single quotes), or GOOGLE_APPLICATION_CREDENTIALS to the key file\'s absolute path. See README.md § Deployment, step 1.');
 }
 
 let google;
@@ -58,10 +73,10 @@ try {
   die('The googleapis package is not installed.', 'Run: npm install');
 }
 
-const auth = new google.auth.GoogleAuth({ keyFile: CREDS, scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
+const auth = new google.auth.GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
 const sheets = google.sheets({ version: 'v4', auth: await auth.getClient() });
 
-const serviceAccountEmail = JSON.parse(readFileSync(CREDS, 'utf8')).client_email;
+const serviceAccountEmail = credentials.client_email;
 
 async function api(fn, what) {
   try {
