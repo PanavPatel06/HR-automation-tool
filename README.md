@@ -349,12 +349,11 @@ candidates.
 
 **Two limits to know before you rely on it:**
 
-- **Replying from the Inbox does not write to a real sheet yet.** The
-  per-candidate **Send** in the thread view answers `E-NOT-IMPLEMENTED` in
-  real-Sheets mode — only the bulk **Generate drafts → Approve → Send**
-  pipeline sends for real. Reading a candidate's Gmail thread, loading a
-  template into the box, and AI drafting all work; it is the final write that
-  is still demo-only.
+- **The first ad-hoc reply against the real sheet is the one to watch.** Both
+  send paths — bulk, and the per-candidate reply in the thread view — are
+  live, gated the same way, and covered by the write-column contract test. But
+  the reply path has only ever run against the demo store, so send the first
+  one to yourself with dry run on and check the row afterwards.
 - **Sign-in is a single shared password.** `approved_by` therefore records
   `dashboard`, not a person. Fine for a small team, not an audit trail.
 
@@ -864,6 +863,7 @@ out-of-order request, before anything is read or written:
 | `E-AUTH` | Session expired — sign in again. |
 | `E-BADREQ` | Request is missing a required field (e.g. no applicants selected). |
 | `E-STAGE` | A bulk action (approve/unapprove) was attempted on rows not in a legal stage for it. |
+| `E-QUOTA` | The day's `send_daily_cap` is used up. Resumes tomorrow, or raise it in Settings — Gmail itself stops around 500/day. |
 | `E-NOTFOUND` | The applicant/template/config key named in the request doesn't exist. |
 | `E-NOT-IMPLEMENTED` | An Inbox action that only works in demo mode was called against a real spreadsheet (ad-hoc reply sending — see [Known limitations](#known-limitations)). |
 
@@ -1054,14 +1054,14 @@ file. What's left as its own doc:
 - **Reply classification and follow-up flagging are manual.** Open the Inbox
   to read what a candidate said; nothing auto-classifies intent or flags a
   silent candidate for you.
-- **Sending an ad-hoc reply from a candidate's thread is demo-mode only.**
-  Against a real spreadsheet the per-candidate **Send** answers
-  `E-NOT-IMPLEMENTED`: its Sheets write path was never wired up. Everything
-  around it works in production — syncing the real Gmail thread, loading a
-  template into the box, AI drafting — and the bulk **Generate drafts →
-  Approve → Send** pipeline sends for real. Wiring the ad-hoc write is a small
-  job (`patchRows`/`appendRow` already work against real Sheets); it needs
-  testing against a live sheet before the guard comes off.
+- **Ad-hoc replies have not been exercised against a real spreadsheet yet.**
+  The demo-only guard is gone and the path is production-shaped — it obeys
+  *Sending* and `send_daily_cap`, writes EmailLog before touching the
+  applicant row, and reports honestly if the sheet write fails after the mail
+  is away. Every write it makes uses columns the contract test enforces, and
+  the code path is identical in both modes (only `lib/sheets.ts` branches).
+  Still: the first real-sheet reply deserves a dry run and a look at the row
+  afterwards.
 - **Dashboard auth is a shared team password**, not per-user sign-in. It
   authenticates the team, so `approved_by` records `dashboard` rather than a
   person. Upgrade path in [dashboard/README.md](dashboard/README.md).

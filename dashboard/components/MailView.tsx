@@ -265,7 +265,10 @@ export function MailView({ applicants, templates, replies, roles, categories: co
   }
 
   const hasPlaceholder = PLACEHOLDER_RE.test(compose.subject) || PLACEHOLDER_RE.test(compose.html);
-  const canSendReply = Boolean(compose.subject.trim() && compose.html.trim() && !hasPlaceholder);
+  // sendEnabled is the Settings master switch. A reply is email leaving the
+  // building too, so it answers to the same switch the bulk Send does —
+  // enforced server-side as well; this only saves the round trip.
+  const canSendReply = Boolean(compose.subject.trim() && compose.html.trim() && !hasPlaceholder && sendEnabled);
   const willSendForReal = gmailConfigured && !dryRun;
 
   return (
@@ -593,9 +596,14 @@ export function MailView({ applicants, templates, replies, roles, categories: co
               ) : null}
 
               <div className="toolbar" style={{ marginTop: 14 }}>
-                <button className={willSendForReal ? 'danger' : 'primary'} disabled={!canSendReply || busy !== null} onClick={send}>
+                <button
+                  className={willSendForReal ? 'danger' : 'primary'}
+                  disabled={!canSendReply || busy !== null} onClick={send}
+                  title={!sendEnabled ? 'Sending is switched off in Settings' : undefined}
+                >
                   {busy === 'send-reply' ? 'Sending…' : willSendForReal ? 'Send for real' : 'Send'}
                 </button>
+                {!sendEnabled ? <span className="muted" style={{ fontSize: 12 }}>Sending is off in Settings.</span> : null}
               </div>
             </div>
           </div>

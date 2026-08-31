@@ -244,9 +244,6 @@ export async function POST(req: Request) {
     }
 
     if (action === 'send-reply') {
-      if (!isDemoMode()) {
-        return fail(501, 'E-NOT-IMPLEMENTED', 'Sending an ad-hoc reply is demo-mode only right now.', 'The bulk approve → send pipeline works against real Sheets; ad-hoc single-thread replies are not yet wired to write there.');
-      }
       const applicantId = String(body.applicant_id ?? '').trim();
       const subject = String(body.subject ?? '').trim();
       const html = String(body.html ?? '').trim();
@@ -278,6 +275,19 @@ export async function POST(req: Request) {
       const dryRun = config.dry_run !== false;
       const willSendForReal = isGmailConfigured() && !dryRun;
 
+      // An ad-hoc reply is still email leaving the building, so it answers to
+      // the same two switches the bulk pipeline does — otherwise turning
+      // Sending off in Settings would only half mean it.
+      if (config.toggle_send === false) {
+        return fail(409, 'E-CONFIG', 'Sending is turned off.', 'Turn on Sending in Settings.');
+      }
+      const cap = Number(config.send_daily_cap) || 400;
+      const today = new Date().toISOString().slice(0, 10);
+      const sentToday = (await readTab('EmailLog')).filter((r) => r.at.startsWith(today) && r.result === 'sent').length;
+      if (sentToday >= cap) {
+        return fail(429, 'E-QUOTA', `Daily send cap of ${cap} reached.`, 'Sending resumes tomorrow, or raise send_daily_cap in Settings — Gmail itself cuts off around 500/day.');
+      }
+
       if (templateId) {
         const templates = await readTab('Templates');
         const template = templates.find((t) => t.template_id === templateId);
@@ -289,7 +299,9 @@ export async function POST(req: Request) {
       }
 
       let providerMessageId = '';
-      let threadId = applicant.thread_id || `thread-demo-${applicant.applicant_id}`;
+      // Only Gmail invents thread ids. Left alone when nothing was really
+      // sent, so a dry run never writes a fabricated id into a real sheet.
+      let threadId = applicant.thread_id || '';
       if (willSendForReal) {
         const sent = await sendMail({
           to: applicant.email, subject, html, attachments,
@@ -301,24 +313,12 @@ export async function POST(req: Request) {
         threadId = sent.threadId || threadId;
       }
 
-      await patchRows('Applicants', [{
-        _row: applicant._row,
-        template_id: templateId,
-        email_subject: subject,
-        email_html: html,
-        email_status: 'sent',
-        sent_at: now,
-        thread_id: threadId,
-        message_id: providerMessageId,
-        stage: 'SENT',
-        error_code: '',
-        error_message: '',
-        updated_at: now,
-      }]);
-
+      // Past this line the email is already gone. EmailLog is written first
+      // and on its own: a send that isn't in the log is a send somebody
+      // repeats, so the audit row matters more than the pipeline state.
       await appendRow('EmailLog', {
         at: now,
-        correlation_id: `run-demo-reply-${Date.now().toString(36)}`,
+        correlation_id: `run-reply-${Date.now().toString(36)}`,
         applicant_id: applicantId,
         to: applicant.email,
         subject,
@@ -329,13 +329,35 @@ export async function POST(req: Request) {
         dry_run: willSendForReal ? 'false' : 'true',
       });
 
-      // Responding to a candidate naturally clears their open replies from
-      // the Inbox/Replies queue — nobody needs to "handle" a message that
-      // has already been answered.
-      const replies = await readTab('Replies');
-      const open = replies.filter((r) => r.applicant_id === applicantId && !r.handled_at);
-      if (open.length) {
-        await patchRows('Replies', open.map((r) => ({ _row: r._row, handled_by: 'dashboard', handled_at: now })));
+      try {
+        await patchRows('Applicants', [{
+          _row: applicant._row,
+          template_id: templateId,
+          email_subject: subject,
+          email_html: html,
+          email_status: 'sent',
+          sent_at: now,
+          thread_id: threadId,
+          message_id: providerMessageId,
+          stage: 'SENT',
+          error_code: '',
+          error_message: '',
+          updated_at: now,
+        }]);
+
+        // Responding to a candidate naturally clears their open replies from
+        // the Inbox/Replies queue — nobody needs to "handle" a message that
+        // has already been answered.
+        const replies = await readTab('Replies');
+        const open = replies.filter((r) => r.applicant_id === applicantId && !r.handled_at);
+        if (open.length) {
+          await patchRows('Replies', open.map((r) => ({ _row: r._row, handled_by: 'dashboard', handled_at: now })));
+        }
+      } catch (err) {
+        const e = err as SheetsError;
+        return fail(500, e.code || 'E-UNKNOWN',
+          `The email ${willSendForReal ? 'was sent' : 'was logged'}, but updating the sheet afterwards failed: ${e.message}`,
+          `${willSendForReal ? 'Do not send it again — it has already gone out. ' : ''}It is recorded in EmailLog. Fix the sheet problem, then set the row's stage to SENT by hand.`);
       }
 
       const attachmentNote = attachments.length ? ` with ${attachments.length} attachment(s)` : '';
