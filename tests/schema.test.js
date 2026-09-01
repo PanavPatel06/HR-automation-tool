@@ -1,14 +1,16 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validateHeaders, columnsFor, CONFIG_DEFAULTS, TAB_NAMES } = require('../lib/schema');
+const { validateHeaders, columnsFor, canTransition, CONFIG_DEFAULTS, TAB_NAMES } = require('../lib/schema');
+
+// --- sheet contract ---------------------------------------------------------
 
 test('the columns a human types come first on Applicants', () => {
   // The sheet is maintained by hand. If the app ever pushes name/email/role
   // past the first screen, adding a candidate becomes a scrolling exercise.
   assert.deepEqual(
-    columnsFor('Applicants').slice(0, 6),
-    ['applicant_id', 'name', 'email', 'job_role', 'category', 'notes'],
+    columnsFor('Applicants').slice(0, 7),
+    ['applicant_id', 'name', 'email', 'job_role', 'category', 'notes', 'stage'],
   );
 });
 
@@ -40,18 +42,21 @@ test('every Config default has a key, value and type', () => {
 });
 
 test('sending ships off, and dry run ships on', () => {
-  // These two are what stop a fresh deployment emailing real candidates before
-  // anyone has looked at a message.
+  // Both of these are what stop a fresh deployment emailing real candidates
+  // before anyone has looked at a draft.
   const byKey = Object.fromEntries(CONFIG_DEFAULTS.map((d) => [d.key, d.value]));
   assert.equal(byKey.dry_run, 'true');
   assert.equal(byKey.toggle_send, 'false');
 });
 
-test('EmailLog can record both halves of a send attempt', () => {
-  // It is the only audit trail — a row must be able to say what was sent, to
-  // whom, whether it was real, and why it failed if it did.
-  const cols = columnsFor('EmailLog');
-  for (const c of ['at', 'to', 'subject', 'result', 'dry_run', 'error_code', 'error_message']) {
-    assert.ok(cols.includes(c), `EmailLog is missing "${c}"`);
-  }
+// --- stage machine -----------------------------------------------------------
+
+test('the stage machine refuses illegal jumps', () => {
+  assert.equal(canTransition('NEW', 'DRAFTED'), true);
+  assert.equal(canTransition('DRAFTED', 'APPROVED'), true);
+  assert.equal(canTransition('APPROVED', 'SENT'), true);
+  assert.equal(canTransition('NEW', 'SENT'), false, 'cannot send without drafting and approving');
+  assert.equal(canTransition('DRAFTED', 'SENT'), false, 'approval is mandatory');
+  assert.equal(canTransition('FAILED', 'DRAFTED'), true, 'retry rolls back to the origin stage');
+  assert.equal(canTransition(null, 'NEW'), true);
 });

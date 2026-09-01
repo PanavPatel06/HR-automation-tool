@@ -1,9 +1,9 @@
 'use client';
 import { useMemo, useState } from 'react';
 import type { Row } from '../lib/contract';
-import { isTruthy } from '../lib/contract';
-import { CategoryPill } from './Pills';
-import { timeAgo } from '../lib/format';
+import { isTruthy, ACTIONABLE, STAGES } from '../lib/contract';
+import { StagePill, CategoryPill } from './Pills';
+import { shortDate, timeAgo } from '../lib/format';
 import { useAction, ResultBanner } from './useAction';
 
 const PLACEHOLDER_RE = /\{\{\s*[a-zA-Z0-9_.]+\s*\}\}/;
@@ -12,6 +12,8 @@ const MAX_ATTACHMENTS_BYTES = 15 * 1024 * 1024;
 type Attachment = { filename: string; mimeType: string; base64: string; size: number };
 type Compose = { templateId: string; subject: string; html: string; instructions: string; attachments: Attachment[] };
 const EMPTY_COMPOSE: Compose = { templateId: '', subject: '', html: '', instructions: '', attachments: [] };
+
+type GroupBy = 'none' | 'stage' | 'role' | 'category';
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -29,54 +31,102 @@ async function fileToBase64(file: File): Promise<string> {
 }
 
 /**
- * The whole app: the people in the Applicants tab on the left, and the message
- * you are about to send them on the right.
+ * The whole app: the candidate list on the left (from the Applicants tab),
+ * and on the right the message you are about to send them.
  *
- * Two ways to write. Pick one person and the composer gives you a brief box —
- * say what the email should cover and the model writes it, pulling their name,
- * role, category and notes out of their sheet row. Or tick several people and
- * send one template, merged separately for each of them.
+ * The composer's centre of gravity is the instructions box. You pick a
+ * candidate, say what the email should cover in plain English, and the model
+ * writes it — their name, role and category come from their sheet row, so you
+ * never type those. A template is optional, either as a starting point or as a
+ * style reference for the model.
  *
- * There is no pipeline and no approval step, because there is nothing to
- * approve: whatever is in the box is what goes, and you are looking at it.
- * Sending is still blocked while a literal {{field}} is visible.
+ * Two rules hold whichever way the message got written:
+ *   - AI only ever fills the compose box; a human still has to press Send.
+ *   - Sending is blocked while a literal {{field}} is still visible.
+ *
+ * Nothing here reads the candidate's mailbox. Their replies arrive in whatever
+ * inbox company_email points at, and a human reads them there.
  */
-export function MailView({ applicants, templates, roles, mailerConfigured, dryRun, sendEnabled, aiEnabled }: {
+export function MailView({ applicants, templates, roles, categories: configCategories, mailerConfigured, dryRun, sendEnabled }: {
   applicants: Row[];
   templates: Row[];
   roles: string[];
+  categories: string[];
   mailerConfigured: boolean;
   dryRun: boolean;
   sendEnabled: boolean;
-  aiEnabled: boolean;
 }) {
   const { run, busy, result, clear } = useAction();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
   const [role, setRole] = useState('');
+  const [stage, setStage] = useState('');
+  const [category, setCategory] = useState('');
+  const [groupBy, setGroupBy] = useState<GroupBy>('none');
+  const [confirmSend, setConfirmSend] = useState(false);
   const [compose, setCompose] = useState<Compose>(EMPTY_COMPOSE);
-  const [bulkTemplateId, setBulkTemplateId] = useState('');
-  const [confirmBulk, setConfirmBulk] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
-  const [showNew, setShowNew] = useState(false);
+  const [categoryDraft, setCategoryDraft] = useState('');
+  const [bulkCategory, setBulkCategory] = useState('');
+  const [showNewContact, setShowNewContact] = useState(false);
   const [newContact, setNewContact] = useState({ name: '', email: '', role: '', category: '', notes: '' });
 
   const activeTemplates = useMemo(() => templates.filter((t) => isTruthy(t.is_active)), [templates]);
 
+  // Categories actually in use, for the filter dropdown — no point offering
+  // "Lead" to filter by if nobody has that category. The assignment picker
+  // below instead suggests configCategories (Config's canonical allowed
+  // list) merged with these, so it can also offer a category nobody has used
+  // yet without inventing a whole "manage categories" screen.
+  const usedCategories = useMemo(
+    () => [...new Set(applicants.map((a) => a.category).filter(Boolean))].sort(),
+    [applicants]
+  );
+  const categorySuggestions = useMemo(
+    () => [...new Set([...configCategories, ...usedCategories])].sort(),
+    [configCategories, usedCategories]
+  );
+
   const list = useMemo(() => applicants
     .filter((a) => a.applicant_id)
     .filter((a) => !role || a.job_role === role)
+    .filter((a) => !stage || a.stage === stage)
+    .filter((a) => !category || a.category === category)
     .filter((a) => {
       if (!query) return true;
       const q = query.toLowerCase();
-      return [a.name, a.email, a.job_role, a.category, a.notes].some((f) => String(f ?? '').toLowerCase().includes(q));
+      return [a.name, a.email, a.applicant_id, a.job_role, a.notes].some((f) => String(f ?? '').toLowerCase().includes(q));
     })
     .sort((a, b) => (b.updated_at || b.created_at || '').localeCompare(a.updated_at || a.created_at || '')),
-    [applicants, role, query]);
+    [applicants, role, stage, category, query]);
+
+  const groupedList = useMemo(() => {
+    if (groupBy === 'none') return [{ key: '', rows: list }];
+    const keyOf = (a: Row) => {
+      if (groupBy === 'stage') return a.stage || 'NEW';
+      if (groupBy === 'role') return a.job_role || 'No role';
+      return a.category || 'Uncategorised';
+    };
+    const map = new Map<string, Row[]>();
+    for (const a of list) {
+      const k = keyOf(a);
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(a);
+    }
+    let keys = [...map.keys()];
+    keys = groupBy === 'stage'
+      ? keys.sort((x, y) => STAGES.indexOf(x as never) - STAGES.indexOf(y as never))
+      : keys.sort();
+    return keys.map((k) => ({ key: k, rows: map.get(k)! }));
+  }, [list, groupBy]);
 
   const selected = useMemo(() => applicants.find((a) => a.applicant_id === selectedId) ?? null, [applicants, selectedId]);
+
   const checkedRows = useMemo(() => applicants.filter((a) => checked.has(a.applicant_id)), [applicants, checked]);
+  const canDraft = checkedRows.length > 0 && checkedRows.every((r) => ACTIONABLE.draft.includes(r.stage as never));
+  const canApprove = checkedRows.length > 0 && checkedRows.every((r) => r.stage === 'DRAFTED');
+  const canSend = checkedRows.length > 0 && checkedRows.every((r) => r.stage === 'APPROVED');
 
   function toggleChecked(id: string) {
     setChecked((prev) => {
@@ -90,42 +140,60 @@ export function MailView({ applicants, templates, roles, mailerConfigured, dryRu
     setSelectedId(id);
     setCompose(EMPTY_COMPOSE);
     setAttachError(null);
+    setCategoryDraft(applicants.find((a) => a.applicant_id === id)?.category ?? '');
     clear();
   }
 
-  async function addApplicant() {
-    const res = await run('add-applicant', {
+  async function bulkAct(action: string) {
+    const res = await run(action, { ids: [...checked] });
+    if (res.ok) setChecked(new Set());
+    setConfirmSend(false);
+  }
+
+  async function saveCategory() {
+    if (!selected) return;
+    await run('set-category', { ids: [selected.applicant_id], category: categoryDraft.trim() });
+  }
+
+  async function applyBulkCategory() {
+    if (!checked.size) return;
+    const res = await run('set-category', { ids: [...checked], category: bulkCategory.trim() });
+    if (res.ok) { setChecked(new Set()); setBulkCategory(''); }
+  }
+
+  async function startConversation() {
+    const res = await run('start-conversation', {
       name: newContact.name.trim(), email: newContact.email.trim(),
-      job_role: newContact.role.trim(), category: newContact.category.trim(), notes: newContact.notes.trim(),
+      job_role: newContact.role, category: newContact.category.trim(), notes: newContact.notes.trim(),
     });
     if (res.ok && res.result?.applicant_id) {
       select(res.result.applicant_id);
       setNewContact({ name: '', email: '', role: '', category: '', notes: '' });
-      setShowNew(false);
+      setShowNewContact(false);
     }
   }
 
-  async function composeWith(action: 'compose-template' | 'compose-ai') {
+  async function useTemplate() {
     if (!selected) return;
-    const res = await run(action, {
+    const res = await run('reply-template-fill', { applicant_id: selected.applicant_id, template_id: compose.templateId });
+    if (res.ok && res.result) setCompose((c) => ({ ...c, subject: res.result?.subject ?? '', html: res.result?.html ?? '' }));
+  }
+
+  async function writeWithAI() {
+    if (!selected) return;
+    const res = await run('reply-ai-draft', {
       applicant_id: selected.applicant_id, template_id: compose.templateId, instructions: compose.instructions,
     });
     if (res.ok && res.result) setCompose((c) => ({ ...c, subject: res.result?.subject ?? c.subject, html: res.result?.html ?? c.html }));
   }
 
-  async function sendOne() {
+  async function send() {
     if (!selected) return;
-    const res = await run('send', {
-      applicant_id: selected.applicant_id, subject: compose.subject, html: compose.html,
+    const res = await run('send-reply', {
+      applicant_id: selected.applicant_id, template_id: compose.templateId, subject: compose.subject, html: compose.html,
       attachments: compose.attachments.map(({ filename, mimeType, base64 }) => ({ filename, mimeType, base64 })),
     });
     if (res.ok) setCompose(EMPTY_COMPOSE);
-  }
-
-  async function sendBulk() {
-    const res = await run('send', { ids: [...checked], template_id: bulkTemplateId });
-    if (res.ok) { setChecked(new Set()); setBulkTemplateId(''); }
-    setConfirmBulk(false);
   }
 
   async function addFiles(fileList: FileList | null) {
@@ -150,73 +218,85 @@ export function MailView({ applicants, templates, roles, mailerConfigured, dryRu
   // says so up front instead of letting someone click into the error.
   const sendingBroken = !dryRun && !mailerConfigured;
   const willSendForReal = !dryRun && mailerConfigured;
-  const canSendAtAll = sendEnabled && !sendingBroken;
-  const canSendOne = Boolean(compose.subject.trim() && compose.html.trim() && !hasPlaceholder && canSendAtAll);
-  // The model needs something to go on: a brief, or a template to rework.
-  const canWriteWithAI = aiEnabled && Boolean(compose.instructions.trim() || compose.templateId);
-  const sendBlockedReason = sendingBroken
-    ? 'Dry run is off but email sending is not configured — sending is refused'
-    : !sendEnabled ? 'Sending is switched off in Settings' : undefined;
+  // sendEnabled is the Settings master switch. Enforced server-side as well;
+  // this only saves the round trip.
+  const canSendReply = Boolean(compose.subject.trim() && compose.html.trim() && !hasPlaceholder && sendEnabled && !sendingBroken);
+  // The model needs something to go on: either a brief, or a template to
+  // rewrite. Matches the server-side check in reply-ai-draft.
+  const canWriteWithAI = Boolean(compose.instructions.trim() || compose.templateId);
 
   return (
     <>
       <ResultBanner result={result} onClose={clear} />
 
-      {checked.size ? (
-        <div className="panel" style={{ marginBottom: 14 }}>
-          <div className="toolbar" style={{ marginBottom: 0 }}>
-            <strong>{checked.size} selected</strong>
-            <span className="muted" style={{ fontSize: 12 }}>Send one template to all of them, merged with each person&apos;s own row.</span>
-            <span className="spacer" />
-            <select value={bulkTemplateId} onChange={(e) => setBulkTemplateId(e.target.value)} style={{ minWidth: 220 }}>
-              <option value="">Pick a template…</option>
-              {activeTemplates.map((t) => (
-                <option key={t.template_id} value={t.template_id}>{t.name}{t.job_role ? ` — ${t.job_role}` : ''}</option>
-              ))}
-            </select>
-            <button
-              className={willSendForReal ? 'danger' : 'primary'}
-              disabled={!bulkTemplateId || busy !== null || !canSendAtAll}
-              onClick={() => setConfirmBulk(true)}
-              title={sendBlockedReason}
-            >
-              {dryRun ? `Dry-run send to ${checked.size}` : `Send to ${checked.size}`}
-            </button>
-            <button className="ghost sm" onClick={() => { setChecked(new Set()); setConfirmBulk(false); }}>Clear</button>
-          </div>
+      <div className="toolbar">
+        <button className="primary" disabled={!canDraft || busy !== null} onClick={() => bulkAct('draft')}>
+          {busy === 'draft' ? 'Generating…' : `Generate drafts${checked.size ? ` (${checked.size})` : ''}`}
+        </button>
+        <button disabled={!canApprove || busy !== null} onClick={() => bulkAct('approve')}>
+          Approve{checked.size ? ` (${checked.size})` : ''}
+        </button>
+        <button disabled={checkedRows.length === 0 || !checkedRows.every((r) => r.stage === 'APPROVED') || busy !== null} onClick={() => bulkAct('unapprove')}>
+          Unapprove
+        </button>
+        <button
+          className={dryRun ? '' : 'danger'}
+          disabled={!canSend || busy !== null || !sendEnabled || sendingBroken}
+          onClick={() => setConfirmSend(true)}
+          title={sendingBroken ? 'Dry run is off but email sending is not configured — sending is refused' : !sendEnabled ? 'Sending is switched off in Settings' : undefined}
+        >
+          {dryRun ? 'Dry-run send' : 'Send'}{checked.size ? ` (${checked.size})` : ''}
+        </button>
+        <span className="spacer" />
+        {checked.size ? <button className="ghost sm" onClick={() => setChecked(new Set())}>Clear selection</button> : null}
+      </div>
 
-          {confirmBulk ? (
-            <div className="banner warn" style={{ marginTop: 12 }}>
-              <span>!</span>
-              <div style={{ flex: 1 }}>
-                <strong>
-                  {dryRun ? `Dry run: log ${checkedRows.length} email(s) without sending?` : `Really email ${checkedRows.length} candidate(s)? This cannot be undone.`}
-                </strong>
-                <div className="hint" style={{ marginTop: 6 }}>
-                  {checkedRows.slice(0, 12).map((r) => r.email).join(', ')}{checkedRows.length > 12 ? ` … and ${checkedRows.length - 12} more` : ''}
-                </div>
-                <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
-                  <button className={dryRun ? 'primary' : 'danger'} onClick={sendBulk} disabled={busy !== null}>
-                    {busy === 'send' ? 'Sending…' : dryRun ? 'Run dry send' : `Yes, send ${checkedRows.length}`}
-                  </button>
-                  <button onClick={() => setConfirmBulk(false)}>Cancel</button>
-                </div>
-              </div>
+      {checked.size ? (
+        <div className="toolbar">
+          <span className="muted" style={{ fontSize: 12 }}>Category for {checked.size} selected</span>
+          <input
+            type="text" list="category-suggestions" value={bulkCategory} onChange={(e) => setBulkCategory(e.target.value)}
+            placeholder="e.g. Senior" style={{ width: 160 }}
+          />
+          <button className="sm" disabled={busy !== null} onClick={applyBulkCategory}>
+            {busy === 'set-category' ? 'Applying…' : 'Set category'}
+          </button>
+        </div>
+      ) : null}
+      <datalist id="category-suggestions">
+        {categorySuggestions.map((c) => <option key={c} value={c} />)}
+      </datalist>
+
+      {confirmSend ? (
+        <div className="banner warn">
+          <span>!</span>
+          <div style={{ flex: 1 }}>
+            <strong>
+              {dryRun ? `Dry run: log ${checkedRows.length} email(s) without sending?` : `Really email ${checkedRows.length} candidate(s)? This cannot be undone.`}
+            </strong>
+            <div className="hint" style={{ marginTop: 6 }}>
+              {checkedRows.slice(0, 12).map((r) => r.email).join(', ')}{checkedRows.length > 12 ? ` … and ${checkedRows.length - 12} more` : ''}
             </div>
-          ) : null}
+            <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+              <button className={dryRun ? 'primary' : 'danger'} onClick={() => bulkAct('send')} disabled={busy !== null}>
+                {busy === 'send' ? 'Sending…' : dryRun ? 'Run dry send' : `Yes, send ${checkedRows.length}`}
+              </button>
+              <button onClick={() => setConfirmSend(false)}>Cancel</button>
+            </div>
+          </div>
         </div>
       ) : null}
 
       <div className="inbox-layout">
         <div className="inbox-list-wrap">
           <div className="toolbar">
-            <input type="search" placeholder="Search name, email, role, notes…" value={query} onChange={(e) => setQuery(e.target.value)} style={{ minWidth: 0, flex: 1 }} />
-            <button type="button" className="ghost sm" onClick={() => setShowNew((v) => !v)}>
-              {showNew ? 'Cancel' : '+ New'}
+            <input type="search" placeholder="Search…" value={query} onChange={(e) => setQuery(e.target.value)} style={{ minWidth: 0, flex: 1 }} />
+            <button type="button" className="ghost sm" onClick={() => setShowNewContact((v) => !v)}>
+              {showNewContact ? 'Cancel' : '+ New'}
             </button>
           </div>
 
-          {showNew ? (
+          {showNewContact ? (
             <div className="panel" style={{ padding: 12, marginBottom: 10 }}>
               <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Adds a row to the Applicants tab.</div>
               <label style={{ display: 'block', marginBottom: 8 }}>
@@ -229,20 +309,20 @@ export function MailView({ applicants, templates, roles, mailerConfigured, dryRu
               </label>
               <div className="grid cols-2" style={{ marginBottom: 8 }}>
                 <label>
-                  <div className="muted" style={{ marginBottom: 4, fontSize: 12 }}>Role</div>
+                  <div className="muted" style={{ marginBottom: 4, fontSize: 12 }}>Role (optional)</div>
                   <input type="text" list="role-suggestions" style={{ width: '100%' }} value={newContact.role} onChange={(e) => setNewContact((c) => ({ ...c, role: e.target.value }))} />
                 </label>
                 <label>
-                  <div className="muted" style={{ marginBottom: 4, fontSize: 12 }}>Category</div>
-                  <input type="text" style={{ width: '100%' }} value={newContact.category} onChange={(e) => setNewContact((c) => ({ ...c, category: e.target.value }))} />
+                  <div className="muted" style={{ marginBottom: 4, fontSize: 12 }}>Category (optional)</div>
+                  <input type="text" list="category-suggestions" style={{ width: '100%' }} value={newContact.category} onChange={(e) => setNewContact((c) => ({ ...c, category: e.target.value }))} />
                 </label>
               </div>
               <label style={{ display: 'block', marginBottom: 8 }}>
                 <div className="muted" style={{ marginBottom: 4, fontSize: 12 }}>Notes (given to the AI as context)</div>
                 <input type="text" style={{ width: '100%' }} value={newContact.notes} onChange={(e) => setNewContact((c) => ({ ...c, notes: e.target.value }))} placeholder="e.g. referred by Meera, strong React portfolio" />
               </label>
-              <button className="primary sm" disabled={!newContact.email.trim() || busy !== null} onClick={addApplicant}>
-                {busy === 'add-applicant' ? 'Adding…' : 'Add candidate'}
+              <button className="primary sm" disabled={!newContact.email.trim() || busy !== null} onClick={startConversation}>
+                {busy === 'start-conversation' ? 'Adding…' : 'Add candidate'}
               </button>
             </div>
           ) : null}
@@ -250,43 +330,65 @@ export function MailView({ applicants, templates, roles, mailerConfigured, dryRu
             {roles.map((r) => <option key={r} value={r} />)}
           </datalist>
 
-          <div className="toolbar" style={{ marginBottom: 8 }}>
-            <select value={role} onChange={(e) => setRole(e.target.value)} style={{ flex: 1 }}>
+          <div className="toolbar" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
+            <select value={role} onChange={(e) => setRole(e.target.value)} style={{ flex: 1, minWidth: 100 }}>
               <option value="">All roles</option>
               {roles.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+            <select value={stage} onChange={(e) => setStage(e.target.value)} style={{ flex: 1, minWidth: 100 }}>
+              <option value="">All stages</option>
+              {STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div className="toolbar" style={{ marginBottom: 8 }}>
+            <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ flex: 1 }}>
+              <option value="">All categories</option>
+              {usedCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="toolbar" style={{ marginBottom: 8 }}>
+            <span className="muted" style={{ fontSize: 12 }}>Group by</span>
+            <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)} style={{ flex: 1 }}>
+              <option value="none">None</option>
+              <option value="category">Category</option>
+              <option value="stage">Stage</option>
+              <option value="role">Role</option>
             </select>
           </div>
 
           <div className="inbox-list">
-            {list.map((a) => (
-              <div key={a.applicant_id} className={`inbox-item${a.applicant_id === selectedId ? ' active' : ''}`}>
-                <input
-                  type="checkbox" className="inbox-item-check" checked={checked.has(a.applicant_id)}
-                  onChange={() => toggleChecked(a.applicant_id)} aria-label={`Select ${a.name || a.email}`}
-                />
-                <button type="button" className="inbox-item-body" onClick={() => select(a.applicant_id)}>
-                  <div className="inbox-item-top">
-                    <span className="inbox-item-name">{a.name || '(no name)'}</span>
-                    <span className="muted" style={{ fontSize: 11, flex: 'none' }}>
-                      {a.last_sent_at ? timeAgo(a.last_sent_at) : ''}
-                    </span>
+            {groupedList.map((group) => (
+              <div key={group.key || 'all'}>
+                {group.key ? <div className="inbox-group-header">{group.key} <span className="muted">({group.rows.length})</span></div> : null}
+                {group.rows.map((a) => (
+                  <div key={a.applicant_id} className={`inbox-item${a.applicant_id === selectedId ? ' active' : ''}`}>
+                    <input
+                      type="checkbox" className="inbox-item-check" checked={checked.has(a.applicant_id)}
+                      onChange={() => toggleChecked(a.applicant_id)} aria-label={`Select ${a.name}`}
+                    />
+                    <button type="button" className="inbox-item-body" onClick={() => select(a.applicant_id)}>
+                      <div className="inbox-item-top">
+                        <span className="inbox-item-name">{a.name || '(no name)'}</span>
+                        <span className="muted" style={{ fontSize: 11, flex: 'none' }}>{timeAgo(a.updated_at || a.created_at)}</span>
+                      </div>
+                      <div className="muted" style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                        {a.job_role} <StagePill stage={a.stage} /> <CategoryPill category={a.category} />
+                      </div>
+                      <div className="inbox-item-snippet muted">
+                        {a.sent_at ? `Last emailed ${timeAgo(a.sent_at)}` : 'Not emailed yet.'}
+                      </div>
+                    </button>
                   </div>
-                  <div className="muted" style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                    {a.job_role} <CategoryPill category={a.category} />
-                  </div>
-                  <div className="inbox-item-snippet muted">
-                    {a.last_subject || a.notes || 'Not written to yet.'}
-                  </div>
-                </button>
+                ))}
               </div>
             ))}
-            {list.length === 0 ? <div className="empty">No candidates match.</div> : null}
+            {list.length === 0 ? <div className="empty">No applicants match.</div> : null}
           </div>
         </div>
 
         {!selected ? (
           <div className="panel inbox-empty-pane">
-            <div className="empty">Pick someone on the left to write to them, or tick several to send one template to all of them.</div>
+            <div className="empty">Select a candidate on the left to write to them.</div>
           </div>
         ) : (
           <div>
@@ -297,22 +399,57 @@ export function MailView({ applicants, templates, roles, mailerConfigured, dryRu
                   <div className="muted mono" style={{ fontSize: 12 }}>{selected.email}</div>
                 </div>
                 <span className="spacer" />
+                <StagePill stage={selected.stage} />
                 <CategoryPill category={selected.category} />
               </div>
-              <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
-                {selected.job_role || 'No role'} · <span className="mono">{selected.applicant_id}</span>
-                {selected.last_sent_at ? <> · last written to {timeAgo(selected.last_sent_at)}</> : null}
+              <div className="toolbar" style={{ marginTop: 6, marginBottom: 0 }}>
+                <span className="muted" style={{ fontSize: 13 }}>
+                  {selected.job_role || 'No role'} · <span className="mono">{selected.applicant_id}</span>
+                </span>
               </div>
+              <div className="toolbar" style={{ marginTop: 6, marginBottom: 0 }}>
+                <span className="muted" style={{ fontSize: 12 }}>Category</span>
+                <input
+                  type="text" list="category-suggestions" value={categoryDraft}
+                  onChange={(e) => setCategoryDraft(e.target.value)}
+                  placeholder="Uncategorised" style={{ width: 180 }}
+                />
+                <button
+                  className="sm" disabled={busy !== null || categoryDraft.trim() === (selected.category || '')}
+                  onClick={saveCategory}
+                >
+                  {busy === 'set-category' ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+              {/* Whatever is in their notes cell — the model is given this
+                  verbatim, so it is worth seeing before writing to them. */}
               {selected.notes ? (
-                <div className="muted" style={{ fontSize: 13, marginTop: 8, fontStyle: 'italic' }}>{selected.notes}</div>
+                <div className="muted" style={{ fontSize: 13, marginTop: 10, fontStyle: 'italic' }}>{selected.notes}</div>
               ) : null}
             </div>
+
+            {/* The last email we sent, straight from the sheet row. There is no
+                inbound half — candidates reply into a real mailbox, not here. */}
+            {selected.email_html ? (
+              <div className="thread">
+                <div className="bubble bubble-sent">
+                  <div className="bubble-meta">
+                    <strong>You</strong><span className="muted">→ {selected.email}</span>
+                    <span className="spacer" />
+                    <span className="muted">{selected.sent_at ? shortDate(selected.sent_at) : 'draft, not sent'}</span>
+                  </div>
+                  <div className="bubble-subject">{selected.email_subject}</div>
+                  <div className="preview" dangerouslySetInnerHTML={{ __html: selected.email_html }} />
+                </div>
+              </div>
+            ) : null}
 
             <div className="panel">
               <h2>Write to {selected.name?.split(' ')[0] || 'this candidate'}</h2>
               <p className="sub">
                 Say what the email should cover — their name{selected.job_role ? `, the ${selected.job_role} role` : ''}
-                {selected.notes ? ', your notes on them' : ''} and the branding are filled in from the sheet.
+                {selected.notes ? ', your notes on them' : ''} and the branding are filled in from the sheet,
+                so you never type those.
                 {sendingBroken
                   ? ' Dry run is off but email sending is not configured — sending is refused until that is fixed. Nothing is being logged as sent.'
                   : willSendForReal ? ' Sending is live: this will reach them for real.'
@@ -330,9 +467,9 @@ export function MailView({ applicants, templates, roles, mailerConfigured, dryRu
               </label>
 
               <label style={{ display: 'block', marginBottom: 12 }}>
-                <div className="muted" style={{ marginBottom: 4 }}>Template (optional)</div>
+                <div className="muted" style={{ marginBottom: 4 }}>Base it on a template (optional)</div>
                 <select style={{ width: '100%' }} value={compose.templateId} onChange={(e) => setCompose((c) => ({ ...c, templateId: e.target.value }))}>
-                  <option value="">None — write from the brief alone</option>
+                  <option value="">No template — write from the instructions alone</option>
                   {activeTemplates.map((t) => (
                     <option key={t.template_id} value={t.template_id}>{t.name}{t.job_role ? ` — ${t.job_role}` : ''}</option>
                   ))}
@@ -341,16 +478,16 @@ export function MailView({ applicants, templates, roles, mailerConfigured, dryRu
 
               <div className="toolbar">
                 <button
-                  className="primary" disabled={busy !== null || !canWriteWithAI} onClick={() => composeWith('compose-ai')}
-                  title={!aiEnabled ? 'AI writing is switched off in Settings' : canWriteWithAI ? undefined : 'Type what the email should say, or pick a template'}
+                  className="primary" disabled={busy !== null || !canWriteWithAI} onClick={writeWithAI}
+                  title={canWriteWithAI ? undefined : 'Type what the email should say, or pick a template'}
                 >
-                  {busy === 'compose-ai' ? 'Writing…' : '✨ Write with AI'}
+                  {busy === 'reply-ai-draft' ? 'Writing…' : '✨ Write with AI'}
                 </button>
                 <button
-                  disabled={busy !== null || !compose.templateId} onClick={() => composeWith('compose-template')}
-                  title={compose.templateId ? 'Fill the template in as-is — no model call' : 'Pick a template first'}
+                  disabled={busy !== null || !compose.templateId} onClick={useTemplate}
+                  title={compose.templateId ? 'Fill the template in as-is, no model call' : 'Pick a template first'}
                 >
-                  {busy === 'compose-template' ? 'Loading…' : 'Use template as-is'}
+                  {busy === 'reply-template-fill' ? 'Loading…' : 'Use template as-is'}
                 </button>
                 <span className="spacer" />
                 {compose.subject || compose.html || compose.attachments.length ? <button className="ghost sm" onClick={() => setCompose(EMPTY_COMPOSE)}>Clear</button> : null}
@@ -402,10 +539,10 @@ export function MailView({ applicants, templates, roles, mailerConfigured, dryRu
               <div className="toolbar" style={{ marginTop: 14 }}>
                 <button
                   className={willSendForReal ? 'danger' : 'primary'}
-                  disabled={!canSendOne || busy !== null} onClick={sendOne}
-                  title={sendBlockedReason}
+                  disabled={!canSendReply || busy !== null} onClick={send}
+                  title={!sendEnabled ? 'Sending is switched off in Settings' : undefined}
                 >
-                  {busy === 'send' ? 'Sending…' : willSendForReal ? 'Send for real' : 'Send'}
+                  {busy === 'send-reply' ? 'Sending…' : willSendForReal ? 'Send for real' : 'Send'}
                 </button>
                 {!sendEnabled ? <span className="muted" style={{ fontSize: 12 }}>Sending is off in Settings.</span> : null}
               </div>

@@ -4,13 +4,13 @@ import { TOGGLES } from '../lib/contract';
 import { useAction, ResultBanner } from './useAction';
 
 /**
- * One switch per thing that costs money or reaches a person.
+ * The function toggles from the project goal: one switch per bulk action.
  *
- * The switches write to the Config tab; the actions in
- * app/api/action/route.ts check their own toggle first and refuse to run when
- * it is off. A toggle takes effect immediately without redeploying anything,
- * and it works even if this dashboard is down — HR can flip the cell in the
- * sheet directly.
+ * The switches write to the Config tab; the Draft and Send actions in
+ * app/api/action/route.ts check their own toggle first and refuse to run
+ * when it is off. That means a toggle takes effect immediately without
+ * redeploying anything, and it works even if this dashboard is down — HR
+ * can flip the cell in the sheet.
  */
 export function SettingsPanel({ config }: { config: Row[] }) {
   const { run, busy, result, clear } = useAction();
@@ -33,7 +33,7 @@ export function SettingsPanel({ config }: { config: Row[] }) {
           <span className="hint">
             {dryRun
               ? 'Sends are recorded in EmailLog but no email leaves the building. Keep this on until a full dry run looks right.'
-              : 'Anything you send reaches a real candidate.'}
+              : 'Approved drafts will reach real candidates.'}
           </span>
         </div>
         <button
@@ -41,7 +41,7 @@ export function SettingsPanel({ config }: { config: Row[] }) {
           disabled={busy !== null}
           onClick={() => {
             const next = dryRun ? 'false' : 'true';
-            if (dryRun && !confirm('Turn OFF dry run? Messages will then be emailed to real candidates.')) return;
+            if (dryRun && !confirm('Turn OFF dry run? Approved drafts will then be emailed to real candidates.')) return;
             run('set-config', { key: 'dry_run', value: next });
           }}
         >
@@ -50,8 +50,8 @@ export function SettingsPanel({ config }: { config: Row[] }) {
       </div>
 
       <div className="panel">
-        <h2>Master switches</h2>
-        <p className="sub">Each switch writes to the Config tab and takes effect on the next click.</p>
+        <h2>Bulk actions</h2>
+        <p className="sub">Each switch writes to the Config tab and takes effect on the next Draft or Send click.</p>
         <div className="table-wrap">
           <table>
             <thead><tr><th>Function</th><th>What it does</th><th style={{ width: 110 }}>State</th></tr></thead>

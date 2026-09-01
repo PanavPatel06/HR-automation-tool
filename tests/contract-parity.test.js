@@ -14,7 +14,7 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 
-const { TABS, columnsFor, TAB_NAMES, CONFIG_DEFAULTS } = require('../lib/schema');
+const { TABS, columnsFor, TAB_NAMES, STAGE, TRANSITIONS, CONFIG_DEFAULTS } = require('../lib/schema');
 
 const CONTRACT_TS = readFileSync(join(__dirname, '..', 'dashboard', 'lib', 'contract.ts'), 'utf8');
 
@@ -39,10 +39,47 @@ test('every tab in the dashboard contract matches lib/schema.js exactly', () => 
 });
 
 test('the dashboard declares exactly the four tabs and no others', () => {
+  // Scope to the TABS block — ACTIONABLE below it has the same key: [...] shape.
   const block = CONTRACT_TS.match(/export const TABS = \{([\s\S]*?)\n\} as const;/);
   assert.ok(block, 'TABS block not found in the dashboard contract');
   const declared = [...block[1].matchAll(/^\s{2}(\w+):\s*\[/gm)].map((m) => m[1]);
   assert.deepEqual(declared.sort(), [...TAB_NAMES].sort(), 'the dashboard must declare exactly the tabs in lib/schema.js');
+});
+
+test('the dashboard stage list matches the stage machine in lib/schema.js', () => {
+  const m = CONTRACT_TS.match(/export const STAGES = \[([\s\S]*?)\] as const/);
+  assert.ok(m, 'STAGES not found in the dashboard contract');
+  const dashboardStages = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+
+  assert.deepEqual(dashboardStages.sort(), Object.values(STAGE).sort());
+});
+
+test('dashboard bulk actions only permit stages the stage machine allows', () => {
+  const m = CONTRACT_TS.match(/export const ACTIONABLE[\s\S]*?\n\};/);
+  assert.ok(m, 'ACTIONABLE not found in the dashboard contract');
+
+  // approve: DRAFTED -> APPROVED must be legal; send: APPROVED -> SENT must be.
+  assert.ok(TRANSITIONS.DRAFTED.includes('APPROVED'), 'DRAFTED -> APPROVED must stay legal');
+  assert.ok(TRANSITIONS.APPROVED.includes('SENT'), 'APPROVED -> SENT must stay legal');
+  assert.ok(!TRANSITIONS.DRAFTED.includes('SENT'), 'DRAFTED -> SENT must stay illegal — approval is mandatory');
+
+  // The dashboard must not offer "send" on any stage the machine would refuse.
+  const sendLine = m[0].match(/send:\s*\[([^\]]*)\]/);
+  const sendStages = [...(sendLine ? sendLine[1] : '').matchAll(/'([^']+)'/g)].map((x) => x[1]);
+  for (const s of sendStages) {
+    assert.ok(TRANSITIONS[s]?.includes('SENT'), `dashboard offers "send" from stage ${s}, which the stage machine would refuse`);
+  }
+});
+
+test('every toggle the dashboard shows exists as a Config default', () => {
+  const block = CONTRACT_TS.match(/export const TOGGLES = \[([\s\S]*?)\n\] as const;/);
+  assert.ok(block, 'TOGGLES not found in the dashboard contract');
+  const keys = [...block[1].matchAll(/key:\s*'(\w+)'/g)].map((m) => m[1]);
+  assert.ok(keys.length >= 2, 'expected at least the two bulk-action toggles');
+  const known = new Set(CONFIG_DEFAULTS.map((d) => d.key));
+  for (const k of keys) {
+    assert.ok(known.has(k), `dashboard toggle "${k}" has no Config default — bootstrap would never create it`);
+  }
 });
 
 test('the dashboard CONFIG_DEFAULTS mirror lib/schema.js key for key', () => {
@@ -55,17 +92,6 @@ test('the dashboard CONFIG_DEFAULTS mirror lib/schema.js key for key', () => {
 
   const values = [...block[1].matchAll(/value:\s*'([^']*)'/g)].map((m) => m[1]);
   assert.deepEqual(values, CONFIG_DEFAULTS.map((d) => d.value), 'Config default values drifted between the two files');
-});
-
-test('every toggle the dashboard shows exists as a Config default', () => {
-  const block = CONTRACT_TS.match(/export const TOGGLES = \[([\s\S]*?)\n\] as const;/);
-  assert.ok(block, 'TOGGLES not found in the dashboard contract');
-  const keys = [...block[1].matchAll(/key:\s*'(\w+)'/g)].map((m) => m[1]);
-  assert.ok(keys.length >= 2, 'expected at least the AI and Sending switches');
-  const known = new Set(CONFIG_DEFAULTS.map((d) => d.key));
-  for (const k of keys) {
-    assert.ok(known.has(k), `dashboard toggle "${k}" has no Config default — bootstrap would never create it`);
-  }
 });
 
 test('lib/schema.js has no duplicate column names within a tab', () => {

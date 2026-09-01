@@ -84,36 +84,39 @@ function blankRow(tab: TabName): Record<string, string> {
 function buildDemoStore(): Record<TabName, Row[]> {
   const now = Date.now();
   const ago = (ms: number) => new Date(now - ms).toISOString();
-  const HOUR = 3_600_000, DAY = 86_400_000;
+  const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
 
   let n = 0;
   const rows = <T extends TabName>(tab: T, list: Array<Partial<Record<(typeof TABS)[T][number], string>>>): Row[] =>
     list.map((overrides) => ({ ...blankRow(tab), ...overrides, _row: (n += 1) + 1 } as unknown as Row));
 
-  return {
+  const store = {
     Applicants: (() => { n = 0; return rows('Applicants', [
-      { applicant_id: 'APP-1001', name: 'Asha Menon', email: 'asha.menon@example.com', job_role: 'Frontend Engineer', category: 'Junior', notes: 'Strong React portfolio, no TypeScript yet. Referred by Meera.', created_at: ago(1 * DAY), updated_at: ago(1 * DAY) },
-      { applicant_id: 'APP-1002', name: 'Ravi Kumar', email: 'ravi.kumar@example.com', job_role: 'Backend Engineer', category: 'Senior', notes: 'Eight years on distributed systems; wants to lead a team.', created_at: ago(2 * DAY), updated_at: ago(20 * HOUR) },
-      { applicant_id: 'APP-1003', name: 'Priya Shah', email: 'priya.shah@example.com', job_role: 'Product Designer', category: 'Mid', notes: 'Portfolio is mostly B2B dashboards \u2014 good fit.', created_at: ago(3 * DAY), updated_at: ago(4 * HOUR) },
-      { applicant_id: 'APP-1004', name: 'Karan Mehta', email: 'karan.mehta@example.com', job_role: 'Backend Engineer', category: 'Senior', last_subject: 'Your application for Backend Engineer at 3Space', last_sent_at: ago(2 * DAY), created_at: ago(5 * DAY), updated_at: ago(2 * DAY) },
-      { applicant_id: 'APP-1005', name: 'Neha Verma', email: 'neha.verma@example.com', job_role: 'Frontend Engineer', category: 'Junior', last_subject: 'Next steps for your Frontend Engineer application', last_sent_at: ago(3 * DAY), created_at: ago(6 * DAY), updated_at: ago(1 * HOUR) },
-      { applicant_id: 'APP-1006', name: 'Not An Email', email: 'oops-at-example', job_role: 'Frontend Engineer', category: 'Junior', notes: 'Deliberately broken address \u2014 shows what preflight catches.', created_at: ago(1 * DAY), updated_at: ago(1 * DAY) },
+      { applicant_id: 'APP-1001', name: 'Asha Menon', email: 'asha.menon@example.com', job_role: 'Frontend Engineer', category: 'Junior', notes: 'Strong React portfolio, no TypeScript yet. Referred by Meera.', stage: 'NEW', created_at: ago(1 * DAY), updated_at: ago(1 * DAY) },
+      { applicant_id: 'APP-1002', name: 'Ravi Kumar', email: 'ravi.kumar@example.com', job_role: 'Backend Engineer', category: 'Senior', notes: 'Eight years on distributed systems; wants to lead a team.', stage: 'DRAFTED', template_id: 'TPL-DEFAULT', email_subject: 'Your application for Backend Engineer at 3Space', email_html: '<p>Hi Ravi,</p><p>Thanks for applying for the Backend Engineer role. We were impressed by your background in distributed systems and would like to move forward.</p><p>Best regards,<br>HR Team</p>', created_at: ago(2 * DAY), updated_at: ago(20 * HOUR) },
+      { applicant_id: 'APP-1003', name: 'Priya Shah', email: 'priya.shah@example.com', job_role: 'Product Designer', category: 'Mid', notes: 'Portfolio is mostly B2B dashboards \u2014 good fit.', stage: 'APPROVED', template_id: 'TPL-DEFAULT', email_subject: 'Your application for Product Designer at 3Space', email_html: '<p>Hi Priya,</p><p>Thanks for applying for the Product Designer role. We would like to continue the conversation.</p><p>Best regards,<br>HR Team</p>', created_at: ago(3 * DAY), updated_at: ago(4 * HOUR) },
+      { applicant_id: 'APP-1004', name: 'Karan Mehta', email: 'karan.mehta@example.com', job_role: 'Backend Engineer', category: 'Senior', stage: 'SENT', template_id: 'TPL-DEFAULT', email_subject: 'Your application for Backend Engineer at 3Space', email_html: '<p>Hi Karan,</p><p>Thanks for applying — we would like to set up a call this week.</p>', sent_at: ago(2 * DAY), created_at: ago(5 * DAY), updated_at: ago(2 * DAY) },
+      { applicant_id: 'APP-1005', name: 'Neha Verma', email: 'neha.verma@example.com', job_role: 'Frontend Engineer', category: 'Junior', stage: 'REPLIED', email_subject: 'Your application for Frontend Engineer at 3Space', email_html: '<p>Hi Neha,</p><p>Thanks for applying for the Frontend Engineer role.</p>', sent_at: ago(3 * DAY), created_at: ago(6 * DAY), updated_at: ago(1 * HOUR) },
+      { applicant_id: 'APP-1006', name: 'Not An Email', email: 'oops-at-example', job_role: 'Frontend Engineer', category: 'Junior', stage: 'NEW', error_code: 'E-VALIDATION', error_message: 'email does not look like a valid address', created_at: ago(30 * MIN), updated_at: ago(30 * MIN) },
+      { applicant_id: 'APP-1007', name: 'Dev Patel', email: 'dev.patel@example.com', job_role: 'Product Designer', category: 'Mid', stage: 'FAILED', error_code: 'E-LLM-EMPTY', error_message: 'Model returned an empty draft after 3 retries', created_at: ago(8 * DAY), updated_at: ago(7 * DAY) },
     ]); })(),
 
     Templates: (() => { n = 0; return rows('Templates', [
       { template_id: 'TPL-DEFAULT', name: 'Default outreach', subject: 'Your application for {{job_role}} at {{company_name}}', html: renderSkeleton(DEFAULT_TEMPLATE_BODY), source: 'seed', is_active: 'TRUE', is_default: 'TRUE', updated_at: ago(30 * DAY) },
-      { template_id: 'TPL-FE-STATIC', name: 'Frontend follow-up', job_role: 'Frontend Engineer', subject: 'Next steps for your Frontend Engineer application', html: renderSkeleton('<p style="margin:0 0 16px;">Hi {{first_name}},</p><p style="margin:0;">Thanks for your interest in the Frontend Engineer role. We will follow up within a week.</p><p style="margin:24px 0 0;">{{hr_signature}}</p>'), source: 'manual', is_active: 'TRUE', is_default: 'FALSE', updated_at: ago(20 * DAY) },
+      { template_id: 'TPL-FE-STATIC', name: 'Frontend follow-up (static)', job_role: 'Frontend Engineer', subject: 'Next steps for your Frontend Engineer application', html: renderSkeleton('<p style="margin:0 0 16px;">Hi {{first_name}},</p><p style="margin:0;">Thanks for your interest in the Frontend Engineer role. We will follow up within a week.</p><p style="margin:24px 0 0;">{{hr_signature}}</p>'), source: 'manual', is_active: 'TRUE', is_default: 'FALSE', updated_at: ago(20 * DAY) },
       { template_id: 'TPL-AI-DRAFT', name: 'AI draft \u2014 Designer outreach', job_role: 'Product Designer', subject: 'Your Product Designer application at {{company_name}}', html: renderSkeleton(DEFAULT_TEMPLATE_BODY), source: 'ai', is_active: 'FALSE', is_default: 'FALSE', updated_at: ago(2 * HOUR) },
     ]); })(),
 
     EmailLog: (() => { n = 0; return rows('EmailLog', [
       { at: ago(2 * DAY), applicant_id: 'APP-1004', to: 'karan.mehta@example.com', subject: 'Your application for Backend Engineer at 3Space', result: 'sent', provider_message_id: 'demo-msg-1004', dry_run: 'false' },
-      { at: ago(3 * DAY), applicant_id: 'APP-1005', to: 'neha.verma@example.com', subject: 'Next steps for your Frontend Engineer application', result: 'sent', provider_message_id: 'demo-msg-1005', dry_run: 'false' },
-      { at: ago(7 * DAY), applicant_id: 'APP-1003', to: 'priya.shah@example.com', subject: 'Your application for Product Designer at 3Space', result: 'failed', error_code: 'E-MAIL-DOMAIN', error_message: 'The domain is not verified on this Resend account', dry_run: 'false' },
+      { at: ago(3 * DAY), applicant_id: 'APP-1005', to: 'neha.verma@example.com', subject: 'Your application for Frontend Engineer at 3Space', result: 'sent', provider_message_id: 'demo-msg-1005', dry_run: 'false' },
+      { at: ago(7 * DAY), applicant_id: 'APP-1007', to: 'dev.patel@example.com', subject: 'Your application for Product Designer at 3Space', result: 'failed', error_code: 'E-MAIL-DOMAIN', error_message: 'The domain is not verified on this Resend account', dry_run: 'false' },
     ]); })(),
 
     Config: (() => { n = 0; return rows('Config', CONFIG_DEFAULTS.map((c) => ({ ...c, updated_at: ago(30 * DAY) }))); })(),
   } as Record<TabName, Row[]>;
+
+  return store;
 }
 
 function demoDb(): Record<TabName, Row[]> {

@@ -5,14 +5,14 @@ import { isTruthy } from '../lib/contract';
 import { useAction, ResultBanner } from './useAction';
 import { shortDate } from '../lib/format';
 
+const AI_FIELD = '{{ai_body}}';
+
 /**
- * Templates are where HR keeps control of tone. A template is a fixed piece of
- * writing with {{merge_fields}} — it renders the same way every time, costs no
- * model quota, and is what a send to several people uses. The model writes
- * *new* templates here, and one-off messages on the Candidates page; it never
- * rewrites a stored template at send time.
- *
- * AI-generated templates arrive inactive and must be read before use.
+ * Templates are where HR keeps control of tone. Two things are made obvious
+ * here because they are the two things that surprise people:
+ *   - a template containing {{ai_body}} spends model quota; one without it
+ *     costs nothing;
+ *   - AI-generated templates arrive inactive and must be read before use.
  */
 export function TemplateManager({ templates, roles }: { templates: Row[]; roles: string[] }) {
   const { run, busy, result, clear } = useAction();
@@ -66,12 +66,13 @@ export function TemplateManager({ templates, roles }: { templates: Row[]; roles:
         <table>
           <thead>
             <tr>
-              <th>Name</th><th>Scope</th><th>Subject</th><th>File</th><th>Source</th><th>Status</th><th>Updated</th><th></th>
+              <th>Name</th><th>Scope</th><th>Subject</th><th>AI</th><th>File</th><th>Source</th><th>Status</th><th>Updated</th><th></th>
             </tr>
           </thead>
           <tbody>
             {templates.map((t) => {
               const active = isTruthy(t.is_active);
+              const usesAi = (t.html + t.subject).includes(AI_FIELD);
               return (
                 <tr key={t.template_id}>
                   <td>
@@ -88,6 +89,11 @@ export function TemplateManager({ templates, roles }: { templates: Row[]; roles:
                     {t.attachment_url
                       ? <a className="pill info" href={t.attachment_url} target="_blank" rel="noreferrer" title={t.attachment_url}>{t.attachment_name || 'file'} 📎</a>
                       : <span className="muted">none</span>}
+                  </td>
+                  <td>
+                    {usesAi
+                      ? <span className="pill info" title="Contains {{ai_body}} — spends model quota per applicant">personalised</span>
+                      : <span className="pill" title="No model call — costs nothing">static</span>}
                   </td>
                   <td><span className="pill">{t.source || 'manual'}</span></td>
                   <td>{active ? <span className="pill ok">active</span> : <span className="pill">inactive</span>}</td>

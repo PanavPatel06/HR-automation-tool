@@ -192,7 +192,7 @@ if (SEED && !CHECK) {
     '<tr><td style="padding:0 36px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="border-top:1px solid #0a0a0a;font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr>',
     '<tr><td style="padding:32px 36px;font-size:15px;line-height:1.75;color:#1a1a1a;">',
     '<p style="margin:0 0 18px;">Hi {{first_name}},</p>',
-    '<p style="margin:0 0 16px;">Thanks for applying for the {{job_role}} role at {{company_name}}. We have your application and will be in touch shortly with next steps.</p>',
+    '{{ai_body}}',
     '<p style="margin:26px 0 0;">{{hr_signature}}</p>',
     '</td></tr>',
     '<tr><td style="padding:18px 36px 26px 36px;border-top:1px solid #ededea;font-size:10px;line-height:1.7;letter-spacing:0.09em;text-transform:uppercase;color:#a8a49b;">{{company_name}} &middot; {{company_email}}</td></tr>',
@@ -215,16 +215,16 @@ if (SEED && !CHECK) {
     },
   }), 'seeding Templates');
 
-  // Only the columns a human ever types — the app fills in the rest.
-  // Column order: applicant_id, name, email, job_role, category, notes.
-  // One row is deliberately invalid, to show what preflight catches.
+  // Only the seven columns a human ever types — the app fills in the rest.
+  // Column order: applicant_id, name, email, job_role, category, notes, stage.
+  // One row is deliberately invalid, to show what a bad address looks like.
   await api(() => sheets.spreadsheets.values.append({
-    spreadsheetId: SHEET_ID, range: 'Applicants!A:F', valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS',
+    spreadsheetId: SHEET_ID, range: 'Applicants!A:G', valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS',
     requestBody: {
       values: [
-        ['APP-DEMO-1', 'Asha Menon', 'asha.demo@example.com', 'Frontend Engineer', 'Junior', 'Strong React portfolio, referred by Meera'],
-        ['APP-DEMO-2', 'Ravi Kumar', 'ravi.demo@example.com', 'Backend Engineer', 'Senior', 'Eight years on distributed systems'],
-        ['APP-DEMO-3', 'Not An Email', 'oops-at-example', 'Frontend Engineer', 'Junior', 'Deliberately broken address'],
+        ['APP-DEMO-1', 'Asha Menon', 'asha.demo@example.com', 'Frontend Engineer', 'Junior', 'Strong React portfolio, referred by Meera', 'NEW'],
+        ['APP-DEMO-2', 'Ravi Kumar', 'ravi.demo@example.com', 'Backend Engineer', 'Senior', 'Eight years on distributed systems', 'NEW'],
+        ['APP-DEMO-3', 'Not An Email', 'oops-at-example', 'Frontend Engineer', 'Junior', 'Deliberately broken address', 'NEW'],
       ],
     },
   }), 'seeding demo applicants');
