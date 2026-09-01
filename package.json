@@ -8,7 +8,6 @@
     "bootstrap:sheets": "node scripts/bootstrap-sheets.mjs",
     "check:sheets": "node scripts/bootstrap-sheets.mjs --check",
     "seed:demo": "node scripts/bootstrap-sheets.mjs --seed-demo",
-    "gmail:oauth": "node scripts/gmail-oauth.mjs",
     "verify": "npm run test"
   },
   "engines": {

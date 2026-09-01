@@ -1,6 +1,6 @@
 import 'server-only';
 import { google } from 'googleapis';
-import { TABS, type TabName, type Row } from './contract';
+import { TABS, CONFIG_DEFAULTS, type TabName, type Row } from './contract';
 import { renderSkeleton, DEFAULT_TEMPLATE_BODY } from './template';
 
 /**
@@ -92,78 +92,28 @@ function buildDemoStore(): Record<TabName, Row[]> {
 
   const store = {
     Applicants: (() => { n = 0; return rows('Applicants', [
-      { applicant_id: 'APP-1001', created_at: ago(1 * DAY), name: 'Asha Menon', email: 'asha.menon@example.com', job_role: 'Frontend Engineer', category: 'Junior', source: 'form', stage: 'NEW', status: 'ok', updated_at: ago(1 * DAY) },
-      { applicant_id: 'APP-1002', created_at: ago(2 * DAY), name: 'Ravi Kumar', email: 'ravi.kumar@example.com', job_role: 'Backend Engineer', category: 'Senior', source: 'form', stage: 'DRAFTED', status: 'ok', template_id: 'TPL-DEFAULT', email_subject: 'Your application for Backend Engineer at Your Company', email_html: '<p>Hi Ravi,</p><p>Thanks for applying for the Backend Engineer role. We were impressed by your background in distributed systems and would like to move forward.</p><p>Best regards,<br>HR Team</p>', updated_at: ago(20 * HOUR) },
-      { applicant_id: 'APP-1003', created_at: ago(3 * DAY), name: 'Priya Shah', email: 'priya.shah@example.com', job_role: 'Product Designer', category: 'Mid', source: 'manual', stage: 'APPROVED', status: 'ok', template_id: 'TPL-DEFAULT', email_subject: 'Your application for Product Designer at Your Company', email_html: '<p>Hi Priya,</p><p>Thanks for applying for the Product Designer role. We would like to continue the conversation.</p><p>Best regards,<br>HR Team</p>', approved_by: 'dashboard', approved_at: ago(4 * HOUR), updated_at: ago(4 * HOUR) },
-      { applicant_id: 'APP-1004', created_at: ago(5 * DAY), name: 'Karan Mehta', email: 'karan.mehta@example.com', job_role: 'Backend Engineer', category: 'Senior', source: 'form', stage: 'SENT', status: 'ok', template_id: 'TPL-DEFAULT', email_subject: 'Your application for Backend Engineer at Your Company', email_html: '<p>Hi Karan, …</p>', email_status: 'sent', sent_at: ago(2 * DAY), thread_id: 'thread-demo-1004', message_id: 'msg-demo-1004', updated_at: ago(2 * DAY) },
-      { applicant_id: 'APP-1005', created_at: ago(6 * DAY), name: 'Neha Verma', email: 'neha.verma@example.com', job_role: 'Frontend Engineer', category: 'Junior', source: 'form', stage: 'REPLIED', status: 'ok', email_status: 'sent', sent_at: ago(3 * DAY), thread_id: 'thread-demo-1005', reply_state: 'interested', updated_at: ago(1 * HOUR) },
-      { applicant_id: 'APP-1006', created_at: ago(30 * MIN), name: 'Not An Email', email: 'oops-at-example', job_role: 'Frontend Engineer', category: 'Junior', source: 'form', stage: 'NEW', status: 'blocked', error_code: 'E-VALIDATION', error_message: 'email does not look like a valid address', updated_at: ago(30 * MIN) },
-      { applicant_id: 'APP-1007', created_at: ago(8 * DAY), name: 'Dev Patel', email: 'dev.patel@example.com', job_role: 'Product Designer', category: 'Mid', source: 'form', stage: 'FAILED', status: 'failed', error_code: 'E-LLM-EMPTY', error_message: 'Model returned an empty draft after 3 retries', correlation_id: 'run-demo-draft-9', updated_at: ago(7 * DAY) },
+      { applicant_id: 'APP-1001', name: 'Asha Menon', email: 'asha.menon@example.com', job_role: 'Frontend Engineer', category: 'Junior', stage: 'NEW', created_at: ago(1 * DAY), updated_at: ago(1 * DAY) },
+      { applicant_id: 'APP-1002', name: 'Ravi Kumar', email: 'ravi.kumar@example.com', job_role: 'Backend Engineer', category: 'Senior', stage: 'DRAFTED', template_id: 'TPL-DEFAULT', email_subject: 'Your application for Backend Engineer at 3Space', email_html: '<p>Hi Ravi,</p><p>Thanks for applying for the Backend Engineer role. We were impressed by your background in distributed systems and would like to move forward.</p><p>Best regards,<br>HR Team</p>', created_at: ago(2 * DAY), updated_at: ago(20 * HOUR) },
+      { applicant_id: 'APP-1003', name: 'Priya Shah', email: 'priya.shah@example.com', job_role: 'Product Designer', category: 'Mid', stage: 'APPROVED', template_id: 'TPL-DEFAULT', email_subject: 'Your application for Product Designer at 3Space', email_html: '<p>Hi Priya,</p><p>Thanks for applying for the Product Designer role. We would like to continue the conversation.</p><p>Best regards,<br>HR Team</p>', created_at: ago(3 * DAY), updated_at: ago(4 * HOUR) },
+      { applicant_id: 'APP-1004', name: 'Karan Mehta', email: 'karan.mehta@example.com', job_role: 'Backend Engineer', category: 'Senior', stage: 'SENT', template_id: 'TPL-DEFAULT', email_subject: 'Your application for Backend Engineer at 3Space', email_html: '<p>Hi Karan,</p><p>Thanks for applying — we would like to set up a call this week.</p>', sent_at: ago(2 * DAY), created_at: ago(5 * DAY), updated_at: ago(2 * DAY) },
+      { applicant_id: 'APP-1005', name: 'Neha Verma', email: 'neha.verma@example.com', job_role: 'Frontend Engineer', category: 'Junior', stage: 'REPLIED', email_subject: 'Your application for Frontend Engineer at 3Space', email_html: '<p>Hi Neha,</p><p>Thanks for applying for the Frontend Engineer role.</p>', sent_at: ago(3 * DAY), created_at: ago(6 * DAY), updated_at: ago(1 * HOUR) },
+      { applicant_id: 'APP-1006', name: 'Not An Email', email: 'oops-at-example', job_role: 'Frontend Engineer', category: 'Junior', stage: 'NEW', error_code: 'E-VALIDATION', error_message: 'email does not look like a valid address', created_at: ago(30 * MIN), updated_at: ago(30 * MIN) },
+      { applicant_id: 'APP-1007', name: 'Dev Patel', email: 'dev.patel@example.com', job_role: 'Product Designer', category: 'Mid', stage: 'FAILED', error_code: 'E-LLM-EMPTY', error_message: 'Model returned an empty draft after 3 retries', created_at: ago(8 * DAY), updated_at: ago(7 * DAY) },
     ]); })(),
 
     Templates: (() => { n = 0; return rows('Templates', [
-      { template_id: 'TPL-DEFAULT', name: 'Default outreach', subject: 'Your application for {{job_role}} at {{company_name}}', html: renderSkeleton(DEFAULT_TEMPLATE_BODY), source: 'seed', is_active: 'TRUE', is_default: 'TRUE', prompt_version: 'seed.v1', created_at: ago(30 * DAY), updated_at: ago(30 * DAY) },
-      { template_id: 'TPL-FE-STATIC', name: 'Frontend follow-up (static)', job_role: 'Frontend Engineer', subject: 'Next steps for your Frontend Engineer application', html: renderSkeleton('<p style="margin:0 0 16px;">Hi {{first_name}},</p><p style="margin:0;">Thanks for your interest in the Frontend Engineer role. We will follow up within a week.</p><p style="margin:24px 0 0;">{{hr_signature}}</p>'), source: 'manual', is_active: 'TRUE', is_default: 'FALSE', created_at: ago(20 * DAY), updated_at: ago(20 * DAY) },
-      { template_id: 'TPL-AI-DRAFT', name: 'AI draft — Designer outreach', job_role: 'Product Designer', subject: 'Your Product Designer application at {{company_name}}', html: renderSkeleton(DEFAULT_TEMPLATE_BODY), source: 'ai', is_active: 'FALSE', is_default: 'FALSE', prompt_version: 'template-gen.v1', created_at: ago(2 * HOUR), updated_at: ago(2 * HOUR) },
-    ]); })(),
-
-    JobRoles: (() => { n = 0; return rows('JobRoles', [
-      { role_id: 'ROLE-1', title: 'Frontend Engineer', department: 'Engineering', is_open: 'TRUE', created_at: ago(60 * DAY) },
-      { role_id: 'ROLE-2', title: 'Backend Engineer', department: 'Engineering', is_open: 'TRUE', created_at: ago(60 * DAY) },
-      { role_id: 'ROLE-3', title: 'Product Designer', department: 'Design', is_open: 'TRUE', created_at: ago(45 * DAY) },
-      { role_id: 'ROLE-4', title: 'Support Engineer', department: 'Engineering', is_open: 'FALSE', created_at: ago(90 * DAY) },
+      { template_id: 'TPL-DEFAULT', name: 'Default outreach', subject: 'Your application for {{job_role}} at {{company_name}}', html: renderSkeleton(DEFAULT_TEMPLATE_BODY), source: 'seed', is_active: 'TRUE', is_default: 'TRUE', updated_at: ago(30 * DAY) },
+      { template_id: 'TPL-FE-STATIC', name: 'Frontend follow-up (static)', job_role: 'Frontend Engineer', subject: 'Next steps for your Frontend Engineer application', html: renderSkeleton('<p style="margin:0 0 16px;">Hi {{first_name}},</p><p style="margin:0;">Thanks for your interest in the Frontend Engineer role. We will follow up within a week.</p><p style="margin:24px 0 0;">{{hr_signature}}</p>'), source: 'manual', is_active: 'TRUE', is_default: 'FALSE', updated_at: ago(20 * DAY) },
+      { template_id: 'TPL-AI-DRAFT', name: 'AI draft \u2014 Designer outreach', job_role: 'Product Designer', subject: 'Your Product Designer application at {{company_name}}', html: renderSkeleton(DEFAULT_TEMPLATE_BODY), source: 'ai', is_active: 'FALSE', is_default: 'FALSE', updated_at: ago(2 * HOUR) },
     ]); })(),
 
     EmailLog: (() => { n = 0; return rows('EmailLog', [
-      { at: ago(2 * DAY), correlation_id: 'run-demo-send-1', applicant_id: 'APP-1004', to: 'karan.mehta@example.com', subject: 'Your application for Backend Engineer at Your Company', provider: 'gmail', result: 'sent', provider_message_id: 'msg-demo-1004', thread_id: 'thread-demo-1004', dry_run: 'false' },
-      { at: ago(3 * DAY), correlation_id: 'run-demo-send-2', applicant_id: 'APP-1005', to: 'neha.verma@example.com', subject: 'Your application for Frontend Engineer at Your Company', provider: 'gmail', result: 'sent', provider_message_id: 'msg-demo-1005', thread_id: 'thread-demo-1005', dry_run: 'false' },
-      { at: ago(7 * DAY), correlation_id: 'run-demo-send-0', applicant_id: 'APP-1007', to: 'dev.patel@example.com', subject: 'Your application for Product Designer at Your Company', provider: 'gmail', result: 'failed', error_code: 'E-GMAIL-BOUNCE', error_message: 'Recipient address rejected', dry_run: 'false' },
+      { at: ago(2 * DAY), applicant_id: 'APP-1004', to: 'karan.mehta@example.com', subject: 'Your application for Backend Engineer at 3Space', result: 'sent', provider_message_id: 'demo-msg-1004', dry_run: 'false' },
+      { at: ago(3 * DAY), applicant_id: 'APP-1005', to: 'neha.verma@example.com', subject: 'Your application for Frontend Engineer at 3Space', result: 'sent', provider_message_id: 'demo-msg-1005', dry_run: 'false' },
+      { at: ago(7 * DAY), applicant_id: 'APP-1007', to: 'dev.patel@example.com', subject: 'Your application for Product Designer at 3Space', result: 'failed', error_code: 'E-MAIL-DOMAIN', error_message: 'The domain is not verified on this Resend account', dry_run: 'false' },
     ]); })(),
 
-    Replies: (() => { n = 0; return rows('Replies', [
-      { received_at: ago(1 * HOUR), applicant_id: 'APP-1005', thread_id: 'thread-demo-1005', from: 'neha.verma@example.com', subject: 'Re: Your application for Frontend Engineer at Your Company', snippet: 'Thanks so much — I would love to move forward, when works for a call?', classified_intent: 'interested', confidence: '0.94', model: 'groq/llama-3.1-8b-instant' },
-      { received_at: ago(9 * HOUR), applicant_id: 'APP-1004', thread_id: 'thread-demo-1004', from: 'karan.mehta@example.com', subject: 'Re: Your application for Backend Engineer at Your Company', snippet: 'Out of office until the 24th, will respond after.', classified_intent: 'out_of_office', confidence: '0.88', model: 'groq/llama-3.1-8b-instant', handled_by: 'dashboard', handled_at: ago(8 * HOUR) },
-      { received_at: ago(26 * HOUR), applicant_id: 'APP-1004', thread_id: 'thread-demo-1004b', from: 'karan.mehta@example.com', subject: 'Re: Your application for Backend Engineer at Your Company', snippet: "Hey — quick one, does this include the relocation stipend we discussed?", classified_intent: 'unclear', confidence: '0.42', model: 'groq/llama-3.1-8b-instant' },
-    ]); })(),
-
-    RunLog: (() => { n = 0; return rows('RunLog', [
-      { started_at: ago(20 * HOUR), correlation_id: 'run-demo-draft-1', workflow: 'Draft', trigger: 'dashboard', finished_at: ago(20 * HOUR), items_in: '2', items_ok: '2', items_failed: '0', status: 'ok', notes: '2 drafted' },
-      { started_at: ago(2 * DAY), correlation_id: 'run-demo-send-1', workflow: 'Send', trigger: 'dashboard', finished_at: ago(2 * DAY), items_in: '1', items_ok: '1', items_failed: '0', status: 'ok', notes: '1 sent' },
-      { started_at: ago(7 * DAY), correlation_id: 'run-demo-draft-9', workflow: 'Draft', trigger: 'dashboard', finished_at: ago(7 * DAY), items_in: '3', items_ok: '2', items_failed: '1', status: 'partial', notes: '1 of 3 drafts failed — model returned empty content' },
-    ]); })(),
-
-    Errors: (() => { n = 0; return rows('Errors', [
-      { at: ago(7 * DAY), correlation_id: 'run-demo-draft-9', applicant_id: 'APP-1007', workflow: 'Draft', node: 'Groq', error_code: 'E-LLM-EMPTY', error_message: 'Model returned an empty draft', severity: 'error', retryable: 'true', hint: 'Usually transient. Click Draft again; escalate if it repeats for the same applicant.', resolved: '' },
-      { at: ago(30 * MIN), correlation_id: 'run-demo-intake', applicant_id: 'APP-1006', workflow: 'Intake', node: 'Validate row', error_code: 'E-VALIDATION', error_message: 'email does not look like a valid address', severity: 'warn', retryable: 'false', hint: 'Fix the email in the Applicants tab.', resolved: '' },
-      { at: ago(9 * DAY), correlation_id: 'run-demo-send-old', applicant_id: 'APP-1007', workflow: 'Send', node: 'Gmail', error_code: 'E-GMAIL-BOUNCE', error_message: 'Recipient address rejected', severity: 'error', retryable: 'false', hint: 'Confirm the address with the candidate before retrying.', resolved: 'TRUE' },
-    ]); })(),
-
-    Quota: (() => { n = 0; return rows('Quota', [
-      { provider: 'groq', model: 'llama-3.1-8b-instant', window: 'daily', requests_used: '46', tokens_used: '118400', requests_limit: '14400', tokens_limit: '500000', window_reset_at: ago(-1 * (24 * HOUR - 4 * HOUR)), updated_at: ago(20 * MIN) },
-      { provider: 'gemini', model: 'gemini-1.5-flash', window: 'daily', requests_used: '3', tokens_used: '6200', requests_limit: '1500', tokens_limit: '1000000', window_reset_at: ago(-1 * (24 * HOUR - 4 * HOUR)), updated_at: ago(2 * HOUR) },
-    ]); })(),
-
-    Config: (() => { n = 0; return rows('Config', [
-      { key: 'dry_run', value: 'true', type: 'boolean', description: 'When true, WF-03 logs sends instead of sending. Ship with this ON.', updated_at: ago(30 * DAY) },
-      { key: 'toggle_intake', value: 'true', type: 'boolean', description: 'Master switch for WF-01 Intake.', updated_at: ago(30 * DAY) },
-      { key: 'toggle_draft', value: 'true', type: 'boolean', description: 'Master switch for WF-02 Draft generation.', updated_at: ago(30 * DAY) },
-      { key: 'toggle_send', value: 'false', type: 'boolean', description: 'Master switch for WF-03 Send. Off by default — turn on deliberately.', updated_at: ago(30 * DAY) },
-      { key: 'toggle_replies', value: 'true', type: 'boolean', description: 'Master switch for WF-04 Reply watcher.', updated_at: ago(30 * DAY) },
-      { key: 'toggle_followup', value: 'false', type: 'boolean', description: 'Master switch for WF-05 Follow-up drafting.', updated_at: ago(30 * DAY) },
-      { key: 'categories', value: 'Intern,Junior,Mid,Senior,Lead', type: 'list', description: 'Allowed values for Applicants.category.', updated_at: ago(30 * DAY) },
-      { key: 'batch_size', value: '10', type: 'number', description: 'Max applicants processed per draft batch.', updated_at: ago(30 * DAY) },
-      { key: 'followup_days', value: '5', type: 'number', description: 'Days of silence before a follow-up is drafted.', updated_at: ago(30 * DAY) },
-      { key: 'max_resume_mb', value: '10', type: 'number', description: 'Reject resumes larger than this.', updated_at: ago(30 * DAY) },
-      { key: 'reply_confidence_min', value: '0.7', type: 'number', description: 'Below this, a reply is flagged needs_human.', updated_at: ago(30 * DAY) },
-      { key: 'send_daily_cap', value: '400', type: 'number', description: 'Self-imposed cap, kept under the Gmail ~500/day ceiling.', updated_at: ago(30 * DAY) },
-      { key: 'company_name', value: '3Space', type: 'string', description: 'Merge field {{company_name}}. Appears in subjects and the template footer.', updated_at: ago(30 * DAY) },
-      { key: 'hr_name', value: 'HR Team', type: 'string', description: 'Merge field {{hr_name}}.', updated_at: ago(30 * DAY) },
-      { key: 'hr_signature', value: 'Best regards,<br>HR Team', type: 'string', description: 'Merge field {{hr_signature}}. HTML allowed.', updated_at: ago(30 * DAY) },
-      { key: 'company_email', value: '3spacetechcorp@gmail.com', type: 'string', description: 'Merge field {{company_email}} — shown in the branded template header.', updated_at: ago(30 * DAY) },
-      { key: 'company_phone', value: 'Tel: +91 63519 32850<br>+91 87809 97391', type: 'string', description: 'Merge field {{company_phone}}. HTML allowed.', updated_at: ago(30 * DAY) },
-      { key: 'company_incubator', value: 'Incubated at<br>PDEU IIC, Gandhinagar', type: 'string', description: 'Merge field {{company_incubator}}. HTML allowed.', updated_at: ago(30 * DAY) },
-      { key: 'company_logo_url', value: '', type: 'string', description: 'Merge field {{company_logo_url}}. Blank derives it from the deployment origin (<dashboard>/brand/logo.png). Set it only if the logo lives elsewhere — it must load without a login.', updated_at: ago(30 * DAY) },
-    ]); })(),
+    Config: (() => { n = 0; return rows('Config', CONFIG_DEFAULTS.map((c) => ({ ...c, updated_at: ago(30 * DAY) }))); })(),
   } as Record<TabName, Row[]>;
 
   return store;

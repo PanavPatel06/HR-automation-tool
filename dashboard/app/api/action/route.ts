@@ -3,9 +3,9 @@ import { revalidatePath } from 'next/cache';
 import { requireSession } from '../../../lib/auth';
 import { readTab, patchRows, appendRow, setConfig, isDemoMode, parseConfig, SheetsError, type Patch } from '../../../lib/sheets';
 import { groqJson, GroqError } from '../../../lib/groq';
-import { buildMergeContext, render, validateHtml, selectTemplate, renderEmail, renderSkeleton, DEFAULT_TEMPLATE_BODY, TemplateError, FIELD_RE } from '../../../lib/template';
+import { buildMergeContext, render, validateHtml, selectTemplate, renderSkeleton, DEFAULT_TEMPLATE_BODY, TemplateError, FIELD_RE } from '../../../lib/template';
 import { selectForDrafting, usesAi, buildDraftPrompt, checkDraftSchema, assembleDraft } from '../../../lib/draft';
-import { findMessagesForAddress, sendMail, fetchUrlAttachment, isGmailConfigured, GmailError, MAX_ATTACHMENTS_BYTES, type OutgoingAttachment } from '../../../lib/gmail';
+import { sendMail, fetchUrlAttachment, isMailerConfigured, mailFrom, MailerError, MAX_ATTACHMENTS_BYTES, type OutgoingAttachment } from '../../../lib/mailer';
 import { ACTIONABLE } from '../../../lib/contract';
 
 export const runtime = 'nodejs';
@@ -15,8 +15,7 @@ export const maxDuration = 300;
  * Every mutating action the dashboard can take. Approval is a pure state
  * change written straight to Sheets — it must never be a model's decision, so
  * it never leaves this process. Draft and Send are the only actions with a
- * side effect outside the sheet (spending model quota, sending mail); they
- * still run in-process, straight to Groq/Gmail — see lib/draft.ts.
+ * side effect outside the sheet (spending model quota, sending mail).
  */
 
 type Body = { action: string; ids?: string[]; [k: string]: unknown };
@@ -26,22 +25,27 @@ function fail(status: number, code: string, message: string, hint = '') {
 }
 
 /**
- * Dry run OFF means "these emails are meant to reach people". If Gmail is not
- * configured, there is no way to honour that, and the only safe answer is to
- * stop.
+ * Dry run OFF means "these emails are meant to reach people". If the mailer is
+ * not configured, there is no way to honour that, and the only safe answer is
+ * to stop.
  *
  * The alternative — quietly logging the send as though it happened — is the
  * worst failure this system could have: rows march to SENT, EmailLog says
  * sent, and nobody finds out until a candidate is never heard from. One blank
- * GMAIL_REFRESH_TOKEN in the deploy environment would do it.
+ * RESEND_API_KEY in the deploy environment would do it.
  *
  * Returns a response when sending must be refused, otherwise null.
  */
-function requireGmailWhenLive(dryRun: boolean) {
-  if (dryRun || isGmailConfigured()) return null;
+function requireMailerWhenLive(dryRun: boolean) {
+  if (dryRun || isMailerConfigured()) return null;
   return fail(503, 'E-CONFIG-MISSING',
-    'Dry run is off, but Gmail is not configured — nothing was sent.',
-    'Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET and GMAIL_REFRESH_TOKEN (run `npm run gmail:oauth`), or turn dry run back on in Settings. Nothing is logged as sent while this is broken.');
+    'Dry run is off, but email sending is not configured — nothing was sent.',
+    'Set RESEND_API_KEY and MAIL_FROM in the deployment environment, or turn dry run back on in Settings. Nothing is logged as sent while this is broken.');
+}
+
+/** Candidates hit Reply on the email; their answer must reach a human, not this app. */
+function replyToAddress(config: Record<string, unknown>): string | undefined {
+  return String(config.company_email ?? '').trim() || undefined;
 }
 
 export async function POST(req: Request) {
@@ -74,7 +78,6 @@ export async function POST(req: Request) {
       ].filter(Boolean).join(' ');
 
       const generated = await groqJson(prompt) as { subject?: string; html?: string };
-      const now = new Date().toISOString();
       // Every template — hand-written seed or AI-generated — shares the same
       // branded shell (logo, contact header, footer); only this inner
       // message fragment differs. See renderSkeleton() in lib/template.ts.
@@ -87,32 +90,29 @@ export async function POST(req: Request) {
         source: 'ai',
         is_active: 'FALSE',
         is_default: 'FALSE',
-        prompt_version: 'template-gen.v1',
-        created_at: now,
-        updated_at: now,
+        updated_at: new Date().toISOString(),
       });
 
       revalidatePath('/', 'layout');
       return NextResponse.json({ ok: true, result: { status: 'ok', notes: `"${created.name}" generated with Groq and saved inactive — review it, then activate.` } });
     }
 
-    // --- Inbox: ad-hoc single-thread replies --------------------------------
+    // --- Composing a reply to one candidate ---------------------------------
     //
-    // Draft/send below are the *bulk* pipeline — batches of applicants moving
-    // through a stage machine. Replying to one candidate's thread from the
-    // Inbox page is a different shape (one applicant, freeform content,
-    // triggered by a human reading their reply). reply-template-fill is a
-    // pure read+render and works everywhere; reply-ai-draft never writes;
-    // send-reply writes for real and answers to the same Sending switch,
-    // daily cap and Gmail requirement the bulk pipeline does.
+    // Draft/send further down are the *bulk* pipeline — batches of applicants
+    // moving through a stage machine. Replying to one person is a different
+    // shape: their name, role and category come out of the Applicants row, you
+    // add a line of instructions, and the model writes the message.
+    // reply-template-fill and reply-ai-draft never write anything; send-reply
+    // answers to the same Sending switch, daily cap and mailer requirement the
+    // bulk pipeline does.
     if (action === 'start-conversation') {
       const name = String(body.name ?? '').trim();
       const email = String(body.email ?? '').trim().toLowerCase();
       const jobRole = String(body.job_role ?? '').trim();
       const category = String(body.category ?? '').trim();
       if (!email) return fail(400, 'E-BADREQ', 'An email address is required.');
-      // Same pragmatic check WF-01 Intake uses — catches typos and empty
-      // cells, not a full RFC 5322 parse.
+      // Pragmatic check — catches typos and empty cells, not a full RFC 5322 parse.
       if (!/^[^\s@,;:<>()[\]\\]+@[^\s@.]+(\.[^\s@.]+)+$/.test(email)) {
         return fail(400, 'E-BADREQ', `"${email}" is not a valid email address.`);
       }
@@ -122,43 +122,21 @@ export async function POST(req: Request) {
       if (existing) {
         return NextResponse.json({ ok: true, result: {
           status: 'ok', applicant_id: existing.applicant_id,
-          notes: `${email} already has a conversation — opening the existing thread.`,
+          notes: `${email} is already in the sheet — opening the existing row.`,
         } });
       }
 
       const now = new Date().toISOString();
       const applicant = await appendRow('Applicants', {
         applicant_id: `APP-${Date.now().toString(36).toUpperCase()}`,
-        created_at: now,
         name, email, job_role: jobRole, category,
-        source: 'manual', stage: 'NEW', status: 'ok',
-        updated_at: now,
+        stage: 'NEW', created_at: now, updated_at: now,
       });
 
       revalidatePath('/', 'layout');
       return NextResponse.json({ ok: true, result: {
         status: 'ok', applicant_id: applicant.applicant_id,
-        notes: `Started a conversation with ${email}.`,
-      } });
-    }
-
-    if (action === 'gmail-sync') {
-      if (!isGmailConfigured()) {
-        return fail(501, 'E-NOT-IMPLEMENTED', 'Gmail is not configured.', 'Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET and GMAIL_REFRESH_TOKEN — run scripts/gmail-oauth.mjs, see dashboard/README.md.');
-      }
-      const applicantId = String(body.applicant_id ?? '').trim();
-      if (!applicantId) return fail(400, 'E-BADREQ', 'No applicant selected.');
-
-      const applicants = await readTab('Applicants');
-      const applicant = applicants.find((a) => a.applicant_id === applicantId);
-      if (!applicant) return fail(404, 'E-NOTFOUND', `Applicant ${applicantId} does not exist.`);
-      if (!applicant.email) return fail(400, 'E-BADREQ', 'This applicant has no email address to search for.');
-
-      const messages = await findMessagesForAddress(applicant.email);
-      return NextResponse.json({ ok: true, result: {
-        status: 'ok',
-        messages,
-        notes: messages.length ? `Imported ${messages.length} real message(s) from Gmail for ${applicant.email}.` : `No Gmail messages found for ${applicant.email}.`,
+        notes: `Added ${email} to the Applicants tab.`,
       } });
     }
 
@@ -182,19 +160,19 @@ export async function POST(req: Request) {
 
       return NextResponse.json({ ok: true, result: {
         status: 'ok', subject, html,
-        notes: template ? `Loaded "${template.name}". Fill in any {{fields}} still showing before sending.` : 'Blank message.',
+        notes: template ? `Loaded "${template.name}" for ${applicant.name || applicant.email}. Fill in any {{fields}} still showing before sending.` : 'Blank message.',
       } });
     }
 
     if (action === 'reply-ai-draft') {
-      // Unlike send-reply, this never writes anything — it's a read + a Groq
-      // call — so unlike the rest of this section it works with real Sheets
-      // too, as long as GROQ_API_KEY is set (groqJson() enforces that itself).
+      // The centre of the app now: the candidate's name, role and category come
+      // out of their Applicants row, HR adds a line of instructions, and the
+      // model writes the message. Reads only — nothing is written until Send.
       const applicantId = String(body.applicant_id ?? '').trim();
       if (!applicantId) return fail(400, 'E-BADREQ', 'No applicant selected.');
 
-      const [applicants, templates, replies, configRows] = await Promise.all([
-        readTab('Applicants'), readTab('Templates'), readTab('Replies'), readTab('Config'),
+      const [applicants, templates, configRows] = await Promise.all([
+        readTab('Applicants'), readTab('Templates'), readTab('Config'),
       ]);
       const applicant = applicants.find((a) => a.applicant_id === applicantId);
       if (!applicant) return fail(404, 'E-NOTFOUND', `Applicant ${applicantId} does not exist.`);
@@ -203,27 +181,21 @@ export async function POST(req: Request) {
       const ctx = buildMergeContext(applicant, config);
       const templateId = String(body.template_id ?? '').trim();
       const template = templateId ? templates.find((t) => t.template_id === templateId) : undefined;
-      const instructions = String(body.instructions ?? '').trim().slice(0, 500);
-      // If the client has a real Gmail message synced (see gmail-sync above),
-      // it can pass its text here so the draft responds to what the
-      // candidate actually wrote in their real inbox, not just the Replies
-      // tab's classified snippet.
-      const gmailContext = String(body.gmail_context ?? '').trim().slice(0, 2000);
-      const latestReply = replies
-        .filter((r) => r.applicant_id === applicantId)
-        .sort((a, b) => b.received_at.localeCompare(a.received_at))[0];
+      const instructions = String(body.instructions ?? '').trim().slice(0, 1000);
+      if (!instructions && !template) {
+        return fail(400, 'E-BADREQ', 'Tell the model what to say.',
+          'Type what this email should cover in the instructions box — for example "invite her to a 30-minute call next week" — or pick a template to base it on.');
+      }
 
       const prompt = [
-        'Write a reply email to a job applicant. Write the final text directly for the person named below — do NOT use {{merge field}} placeholders anywhere in the output.',
-        `Candidate: ${ctx.first_name} (full name: ${ctx.name || 'unknown'}), applying for ${ctx.job_role || 'an open role'}.`,
+        'Write an email to a job applicant. Write the final text directly for the person named below — do NOT use {{merge field}} placeholders anywhere in the output.',
+        `Candidate: ${ctx.first_name} (full name: ${ctx.name || 'unknown'}), applying for ${ctx.job_role || 'an open role'}${ctx.category ? ` at ${ctx.category} level` : ''}.`,
         `Sign off using company "${ctx.company_name || 'the company'}" and sender "${ctx.hr_name || 'HR'}".`,
-        gmailContext
-          ? `The candidate's most recent real email to us said: "${gmailContext}". Reply directly and specifically to this.`
-          : latestReply
-            ? `The candidate's most recent message to us (classified intent: ${latestReply.classified_intent || 'unclear'}): "${latestReply.snippet}". Reply directly and specifically to this.`
-            : 'The candidate has not replied to anything yet — this is a proactive outreach or status update, not a reply to a message.',
+        applicant.email_subject
+          ? `For context, the last email we sent this candidate had the subject "${applicant.email_subject}". Do not repeat it wholesale.`
+          : 'We have not emailed this candidate before.',
         template ? `Match the tone of this existing template as a style reference only — do not copy its literal {{placeholders}}: subject "${template.subject}", body "${template.html}".` : '',
-        instructions ? `Extra instructions from HR: ${instructions}.` : '',
+        instructions ? `What this email must say, from HR: ${instructions}.` : '',
         'Return JSON only: {"subject": string, "html": string}. The html should be simple, email-safe markup (p, br, a, strong, em, ul/li) — no <script> or <iframe>.',
         'html is the message body only: greeting, a few short paragraphs, sign-off. No <html>, <head>, <body>, no logo, header, or company contact block — those are added automatically around whatever you return.',
         'Do not invent facts, dates, compensation, interview times, or promises beyond what is given above.',
@@ -251,12 +223,12 @@ export async function POST(req: Request) {
           unresolved.length ? `Unresolved field(s): ${unresolved.map((f) => `{{${f}}}`).join(', ')}.` : '',
           !subjectR.html.trim() ? 'Subject was empty.' : '',
         ].filter(Boolean).join(' ');
-        throw new GroqError('E-LLM-JSON', `Groq's draft did not pass validation: ${problems}`, 'Try Write with AI again, or write the reply manually.');
+        throw new GroqError('E-LLM-JSON', `Groq's draft did not pass validation: ${problems}`, 'Try Write with AI again, or write the message manually.');
       }
 
       return NextResponse.json({ ok: true, result: {
         status: 'ok', subject: subjectR.html.trim(), html: bodyR.html,
-        notes: 'AI draft ready — review it, then send.',
+        notes: `Draft ready for ${ctx.name || applicant.email} — review it, then send.`,
       } });
     }
 
@@ -284,30 +256,26 @@ export async function POST(req: Request) {
       const templateId = String(body.template_id ?? '').trim();
       const configRows = await readTab('Config');
       const config = parseConfig(configRows);
-      // Same safety switch the bulk pipeline (WF-03) respects: real sending
-      // only happens when dry_run has been deliberately turned off in
-      // Settings. Gmail being configured is not enough on its own — that
-      // would make flipping GMAIL_REFRESH_TOKEN into .env.local the same as
-      // consenting to send real mail, which is the wrong default.
+      // Real sending only happens when dry_run has been deliberately turned
+      // off in Settings. The mailer being configured is not enough on its own
+      // — that would make pasting an API key into the environment the same as
+      // consenting to email real people, which is the wrong default.
       const dryRun = config.dry_run !== false;
       const willSendForReal = !dryRun;
-      // Live sending with no mailbox behind it is a broken deployment, not a
+      // Live sending with no mailer behind it is a broken deployment, not a
       // quieter mode of working. Fail here rather than logging "sent" for an
-      // email nobody will ever receive. See requireGmailWhenLive().
-      const misconfigured = requireGmailWhenLive(dryRun);
+      // email nobody will ever receive. See requireMailerWhenLive().
+      const misconfigured = requireMailerWhenLive(dryRun);
       if (misconfigured) return misconfigured;
 
-      // An ad-hoc reply is still email leaving the building, so it answers to
-      // the same two switches the bulk pipeline does — otherwise turning
-      // Sending off in Settings would only half mean it.
       if (config.toggle_send === false) {
         return fail(409, 'E-CONFIG', 'Sending is turned off.', 'Turn on Sending in Settings.');
       }
-      const cap = Number(config.send_daily_cap) || 400;
+      const cap = Number(config.send_daily_cap) || 100;
       const today = new Date().toISOString().slice(0, 10);
       const sentToday = (await readTab('EmailLog')).filter((r) => r.at.startsWith(today) && r.result === 'sent').length;
       if (sentToday >= cap) {
-        return fail(429, 'E-QUOTA', `Daily send cap of ${cap} reached.`, 'Sending resumes tomorrow, or raise send_daily_cap in Settings — Gmail itself cuts off around 500/day.');
+        return fail(429, 'E-QUOTA', `Daily send cap of ${cap} reached.`, "Sending resumes tomorrow, or raise send_daily_cap in Settings — Resend's free tier itself cuts off at 100/day.");
       }
 
       if (templateId) {
@@ -321,18 +289,9 @@ export async function POST(req: Request) {
       }
 
       let providerMessageId = '';
-      // Only Gmail invents thread ids. Left alone when nothing was really
-      // sent, so a dry run never writes a fabricated id into a real sheet.
-      let threadId = applicant.thread_id || '';
       if (willSendForReal) {
-        const sent = await sendMail({
-          to: applicant.email, subject, html, attachments,
-          threadId: applicant.thread_id || undefined,
-          inReplyTo: applicant.message_id || undefined,
-          references: applicant.message_id || undefined,
-        });
+        const sent = await sendMail({ to: applicant.email, subject, html, attachments, replyTo: replyToAddress(config) });
         providerMessageId = sent.id;
-        threadId = sent.threadId || threadId;
       }
 
       // Past this line the email is already gone. EmailLog is written first
@@ -340,14 +299,11 @@ export async function POST(req: Request) {
       // repeats, so the audit row matters more than the pipeline state.
       await appendRow('EmailLog', {
         at: now,
-        correlation_id: `run-reply-${Date.now().toString(36)}`,
         applicant_id: applicantId,
         to: applicant.email,
         subject,
-        provider: willSendForReal ? 'gmail' : 'dry-run',
         result: 'sent',
         provider_message_id: providerMessageId,
-        thread_id: threadId,
         dry_run: willSendForReal ? 'false' : 'true',
       });
 
@@ -357,24 +313,12 @@ export async function POST(req: Request) {
           template_id: templateId,
           email_subject: subject,
           email_html: html,
-          email_status: 'sent',
           sent_at: now,
-          thread_id: threadId,
-          message_id: providerMessageId,
           stage: 'SENT',
           error_code: '',
           error_message: '',
           updated_at: now,
         }]);
-
-        // Responding to a candidate naturally clears their open replies from
-        // the Inbox/Replies queue — nobody needs to "handle" a message that
-        // has already been answered.
-        const replies = await readTab('Replies');
-        const open = replies.filter((r) => r.applicant_id === applicantId && !r.handled_at);
-        if (open.length) {
-          await patchRows('Replies', open.map((r) => ({ _row: r._row, handled_by: 'dashboard', handled_at: now })));
-        }
       } catch (err) {
         const e = err as SheetsError;
         return fail(500, e.code || 'E-UNKNOWN',
@@ -387,8 +331,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, result: {
         status: 'ok',
         notes: willSendForReal
-          ? `Reply actually sent via Gmail to ${applicant.email}${attachmentNote}.`
-          : `Reply "sent" to ${applicant.email}${attachmentNote} — logged in Email Log, not actually delivered. ${isGmailConfigured() ? 'Turn off dry run in Settings to send for real.' : 'Configure Gmail to send for real — see dashboard/README.md.'}`,
+          ? `Sent to ${applicant.email}${attachmentNote}. Replies go to ${replyToAddress(config) || mailFrom()}.`
+          : `"Sent" to ${applicant.email}${attachmentNote} — logged in the Email Log, not actually delivered. ${isMailerConfigured() ? 'Turn off dry run in Settings to send for real.' : 'Set RESEND_API_KEY and MAIL_FROM to send for real — see README.md.'}`,
       } });
     }
 
@@ -430,7 +374,7 @@ export async function POST(req: Request) {
         } catch (err) {
           const e = err as { code?: string; message: string };
           errors.push({ applicant_id: applicant.applicant_id, code: e.code, message: e.message });
-          patches.push({ _row: applicant._row, stage: 'FAILED', status: 'failed', error_code: e.code || 'E-UNKNOWN', error_message: e.message, updated_at: now } as Patch);
+          patches.push({ _row: applicant._row, stage: 'FAILED', error_code: e.code || 'E-UNKNOWN', error_message: e.message, updated_at: now } as Patch);
         }
       }
 
@@ -458,10 +402,11 @@ export async function POST(req: Request) {
       const dryRun = config.dry_run !== false;
       const willSendForReal = !dryRun;
       // Checked once for the whole batch, before a single row is touched: a
-      // missing mailbox is a deployment fault, not a per-candidate one.
-      const misconfigured = requireGmailWhenLive(dryRun);
+      // missing mailer is a deployment fault, not a per-candidate one.
+      const misconfigured = requireMailerWhenLive(dryRun);
       if (misconfigured) return misconfigured;
-      const cap = Number(config.send_daily_cap) || 400;
+      const cap = Number(config.send_daily_cap) || 100;
+      const replyTo = replyToAddress(config);
 
       const [applicants, emailLog, templates] = await Promise.all([readTab('Applicants'), readTab('EmailLog'), readTab('Templates')]);
       const today = new Date().toISOString().slice(0, 10);
@@ -485,10 +430,9 @@ export async function POST(req: Request) {
       const errors: Array<{ applicant_id?: string; message?: string }> = [];
       let okCount = 0;
 
-      const runId = `run-send-${Date.now().toString(36)}`;
       const logSend = (a: (typeof applicants)[number], overrides: Record<string, string>) => logEntries.push({
-        at: now, correlation_id: runId, applicant_id: a.applicant_id, to: a.email, subject: a.email_subject,
-        provider: '', result: '', provider_message_id: '', thread_id: '', dry_run: 'false', error_code: '', error_message: '',
+        at: now, applicant_id: a.applicant_id, to: a.email, subject: a.email_subject,
+        result: '', provider_message_id: '', dry_run: 'false', error_code: '', error_message: '',
         ...overrides,
       });
 
@@ -501,33 +445,32 @@ export async function POST(req: Request) {
         if (!a.email_subject || !a.email_html) { reject('Row is APPROVED but has no draft body. Regenerate the draft.'); continue; }
         if (/\{\{[^}]+\}\}/.test(a.email_subject + a.email_html)) { reject('Draft still contains unresolved merge fields. Nothing was sent.'); continue; }
         if (!/^[^\s@,;:<>()[\]\\]+@[^\s@.]+(\.[^\s@.]+)+$/.test(a.email)) { reject(`"${a.email}" is not a deliverable address.`); continue; }
-        if (a.email_status === 'sent') { reject('Already sent. Refusing to send a duplicate.'); continue; }
+        if (a.sent_at) { reject('Already sent. Refusing to send a duplicate.'); continue; }
         if (budget <= 0) { reject(`Daily send cap of ${cap} reached. Remaining sends resume tomorrow.`); continue; }
 
         let providerMessageId = '';
-        let threadId = a.thread_id || '';
         if (willSendForReal) {
           try {
             const templateAttachment = await attachmentFor(a.template_id);
             const sent = await sendMail({
-              to: a.email, subject: a.email_subject, html: a.email_html,
+              to: a.email, subject: a.email_subject, html: a.email_html, replyTo,
               attachments: templateAttachment ? [templateAttachment] : undefined,
-              threadId: a.thread_id || undefined, inReplyTo: a.message_id || undefined, references: a.message_id || undefined,
             });
             providerMessageId = sent.id;
-            threadId = sent.threadId || threadId;
           } catch (err) {
-            const e = err as GmailError;
+            // One rejected recipient must not abort the batch, and must never
+            // leave the row looking sent. It stays APPROVED and retryable.
+            const e = err as MailerError;
             reject(e.message);
-            logSend(a, { provider: 'gmail', result: 'failed', error_code: e.code || 'E-UNKNOWN', error_message: e.message });
+            logSend(a, { result: 'failed', error_code: e.code || 'E-UNKNOWN', error_message: e.message });
             continue;
           }
         }
 
         budget--;
         okCount++;
-        patches.push({ _row: a._row, email_status: 'sent', sent_at: now, thread_id: threadId, message_id: providerMessageId, stage: 'SENT', error_code: '', error_message: '', updated_at: now });
-        logSend(a, { provider: willSendForReal ? 'gmail' : 'dry-run', result: 'sent', provider_message_id: providerMessageId, thread_id: threadId, dry_run: willSendForReal ? 'false' : 'true' });
+        patches.push({ _row: a._row, sent_at: now, stage: 'SENT', error_code: '', error_message: '', updated_at: now });
+        logSend(a, { result: 'sent', provider_message_id: providerMessageId, dry_run: willSendForReal ? 'false' : 'true' });
       }
 
       if (patches.length) await patchRows('Applicants', patches);
@@ -544,9 +487,9 @@ export async function POST(req: Request) {
     // --- Preflight: check every credential without writing or sending -------
     if (action === 'preflight') {
       const checks: Array<{ check: string; ok: boolean; detail: string; fix: string }> = [];
-      const warnOnly = new Set(['dry_run is ON', 'Gmail configured (optional)']);
+      const warnOnly = new Set(['dry_run is ON', 'Email sending configured (optional)']);
       const add = (check: string, ok: boolean, detail = '', fix = '') => checks.push({ check, ok, detail, fix: ok ? '' : fix });
-      // Whether a missing Gmail is a warning or a failure depends on dry run,
+      // Whether a missing mailer is a warning or a failure depends on dry run,
       // which is read further down. Recorded here, judged at the end.
       let liveSending = false;
 
@@ -555,7 +498,7 @@ export async function POST(req: Request) {
       if (isDemoMode()) {
         add('Google Sheets configured', true, 'not set — running in demo mode with a built-in sample dataset', '');
         // Still read the switches: a rehearsal in demo mode should surface the
-        // same "live but no mailbox" failure a real deployment would.
+        // same "live but no mailer" failure a real deployment would.
         liveSending = parseConfig(await readTab('Config')).dry_run === false;
       } else {
         try {
@@ -577,11 +520,13 @@ export async function POST(req: Request) {
       // difference between mail going out and mail silently not going out,
       // so it is promoted to a hard failure and named accordingly.
       if (liveSending) {
-        add('Gmail configured (REQUIRED — dry run is off)', isGmailConfigured(),
-          isGmailConfigured() ? 'present' : 'MISSING — every send will be refused until this is fixed',
-          'Run `npm run gmail:oauth` and set the three GMAIL_* variables, or turn dry run back on in Settings.');
+        add('Email sending configured (REQUIRED — dry run is off)', isMailerConfigured(),
+          isMailerConfigured() ? `sending as ${mailFrom()}` : 'MISSING — every send will be refused until this is fixed',
+          'Set RESEND_API_KEY and MAIL_FROM in the deployment environment, or turn dry run back on in Settings.');
       } else {
-        add('Gmail configured (optional)', isGmailConfigured(), isGmailConfigured() ? 'present' : 'not set — sends stay logged-only, never delivered', 'Run `npm run gmail:oauth` to enable real sending.');
+        add('Email sending configured (optional)', isMailerConfigured(),
+          isMailerConfigured() ? `sending as ${mailFrom()}` : 'not set — sends stay logged-only, never delivered',
+          'Set RESEND_API_KEY and MAIL_FROM to enable real sending.');
       }
 
       const failedChecks = checks.filter((c) => !c.ok);
@@ -615,8 +560,8 @@ export async function POST(req: Request) {
         }
 
         const patches: Patch[] = targets.map((r): Patch => (action === 'approve'
-          ? { _row: r._row, stage: 'APPROVED', approved_by: 'dashboard', approved_at: now, error_code: '', error_message: '', updated_at: now }
-          : { _row: r._row, stage: 'DRAFTED', approved_by: '', approved_at: '', updated_at: now }));
+          ? { _row: r._row, stage: 'APPROVED', error_code: '', error_message: '', updated_at: now }
+          : { _row: r._row, stage: 'DRAFTED', updated_at: now }));
 
         const n = await patchRows('Applicants', patches);
         revalidatePath('/', 'layout');
@@ -670,22 +615,13 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: true, result: { status: 'ok', notes: attachmentUrl ? `Attachment set on ${target.name}.` : `Attachment removed from ${target.name}.` } });
       }
 
-      case 'resolve-error': {
-        const correlationIds: string[] = (body.correlation_ids as string[]) ?? [];
-        const rows = await readTab('Errors');
-        const targets = rows.filter((r) => correlationIds.includes(r.correlation_id) && r.resolved !== 'TRUE');
-        const n = await patchRows('Errors', targets.map((r) => ({ _row: r._row, resolved: 'TRUE' })));
-        revalidatePath('/', 'layout');
-        return NextResponse.json({ ok: true, result: { status: 'ok', notes: `${n} error(s) marked resolved` } });
-      }
-
       default:
         return fail(400, 'E-BADREQ', `Unknown action "${action}".`);
     }
   } catch (err) {
-    if (err instanceof TemplateError || err instanceof SheetsError || err instanceof GroqError || err instanceof GmailError) {
+    if (err instanceof TemplateError || err instanceof SheetsError || err instanceof GroqError || err instanceof MailerError) {
       return NextResponse.json({ ok: false, code: err.code, message: err.message, hint: err.hint }, { status: 502 });
     }
-    return fail(500, 'E-UNKNOWN', (err as Error)?.message ?? 'Unexpected failure.', 'Check the Vercel function logs.');
+    return fail(500, 'E-UNKNOWN', (err as Error)?.message ?? 'Unexpected failure.', 'Check the server logs.');
   }
 }

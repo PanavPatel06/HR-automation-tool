@@ -1,10 +1,6 @@
 'use client';
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-// Type-only: erased at compile time (isolatedModules), so lib/gmail.ts's
-// `server-only` import never ends up in this client bundle.
-import type { GmailMessage } from '../lib/gmail';
-
 export type ActionResult = {
   ok: boolean;
   code?: string;
@@ -17,12 +13,10 @@ export type ActionResult = {
     items_failed?: number;
     warnings?: string[];
     errors?: Array<{ applicant_id?: string; code?: string; message?: string }>;
-    // Inbox reply actions (reply-template-fill / reply-ai-draft) hand back a
+    // The compose actions (reply-template-fill / reply-ai-draft) hand back a
     // draft for the compose box rather than a batch summary.
     subject?: string;
     html?: string;
-    // gmail-sync hands back the applicant's real thread.
-    messages?: GmailMessage[];
     // start-conversation hands back the id of the (new or existing) applicant.
     applicant_id?: string;
   };

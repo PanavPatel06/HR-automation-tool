@@ -36,10 +36,11 @@ services:
         sync: false
       - key: GROQ_MODEL
         sync: false
-      # --- Gmail: optional. Blank keeps sending logged-only ---
-      - key: GMAIL_CLIENT_ID
+      # --- Sending email (Resend). Blank keeps sending logged-only, and the
+      # app REFUSES to send at all once dry run is turned off. ---
+      - key: RESEND_API_KEY
         sync: false
-      - key: GMAIL_CLIENT_SECRET
-        sync: false
-      - key: GMAIL_REFRESH_TOKEN
+      # The visible sender, e.g. "3Space Hiring <hiring@yourdomain.com>".
+      # Must be at a domain verified on the Resend account.
+      - key: MAIL_FROM
         sync: false

@@ -1,4 +1,4 @@
-import { readTabs, SheetsError } from '../../lib/sheets';
+import { readTab, SheetsError } from '../../lib/sheets';
 import { TemplateManager } from '../../components/TemplateManager';
 import { ErrorBanner } from '../../components/Pills';
 
@@ -6,9 +6,10 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export default async function TemplatesPage() {
-  let data;
+  let data: { templates: Awaited<ReturnType<typeof readTab>>; applicants: Awaited<ReturnType<typeof readTab>> };
   try {
-    data = await readTabs(['Templates', 'JobRoles']);
+    const [templates, applicants] = await Promise.all([readTab('Templates'), readTab('Applicants')]);
+    data = { templates, applicants };
   } catch (err) {
     const e = err as SheetsError;
     return <><div className="eyebrow">Content system</div><h1>Templates</h1><ErrorBanner error={{ code: e.code, message: e.message, hint: e.hint }} /></>;
@@ -23,8 +24,8 @@ export default async function TemplatesPage() {
         role, which beats the default.
       </p>
       <TemplateManager
-        templates={data.Templates}
-        roles={data.JobRoles.map((r) => r.title).filter(Boolean)}
+        templates={data.templates}
+        roles={[...new Set(data.applicants.map((a) => a.job_role).filter(Boolean))].sort()}
       />
     </>
   );

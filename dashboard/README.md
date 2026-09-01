@@ -1,204 +1,97 @@
 # Dashboard
 
-Next.js App Router app. Deploys to Vercel Hobby (free) with
-**Root Directory = `dashboard`**.
+The whole application. Next.js App Router, deployed from this directory alone.
 
 ```
-app/                    pages (server components) + API routes
-app/page.tsx            the merged Applicants+Inbox page — pipeline table + per-candidate thread
-app/api/gmail-attachment/  streams a real Gmail attachment back as a download
-components/MailView.tsx    the merged page's client component — list, thread, compose
-lib/sheets.ts           Google Sheets read/write — the whole data layer (+ demo-mode fallback)
-lib/groq.ts             direct Groq client — the dashboard's only model provider
-lib/gmail.ts            direct Gmail client — real import/send (optional)
-lib/template.ts         merge-field rendering, HTML validation, template selection
-lib/draft.ts            batch selection + prompt/schema logic for the Draft action
-lib/contract.ts         the column contract (mirrored; see below)
-lib/auth.ts             session cookie
+app/page.tsx              the app — candidate list + per-candidate composer
+app/templates/            template library, AI template generation
+app/console/              preflight checks + the send log
+app/settings/             the Config toggles
+app/api/action/route.ts   EVERY mutating action, and every safety gate
+app/api/login|logout/     shared-password session
+
+lib/contract.ts           hand-mirror of ../lib/schema.js (parity-tested)
+lib/sheets.ts             all Sheets I/O + the demo dataset
+lib/mailer.ts             all outbound email (Resend, over plain fetch)
+lib/template.ts           merge fields, HTML validation, template choice, the branded shell
+lib/draft.ts              batch selection, draft prompt, model-output gate
+lib/groq.ts               the only model provider
+lib/auth.ts               session cookie
 ```
 
-Applicants and Inbox used to be two pages; they're one now (`/`, `MailView.tsx`) —
-work the pipeline in bulk from the list (checkboxes, draft/approve/send, same
-rules as before, plus grouping by stage/role/reply intent), or open one
-candidate to see their whole thread and reply.
+Everything user-facing lives at `/`. `components/MailView.tsx` is the single
+biggest file and holds the candidate list, the bulk pipeline actions, and the
+composer.
 
-## How it talks to everything
+## Demo mode
 
-**Reads** go straight to Google Sheets in server components. Every page is
-`force-dynamic` — the sheet is the truth, so nothing is cached.
+With `SHEET_ID` or `GOOGLE_SERVICE_ACCOUNT_JSON` unset, `lib/sheets.ts` serves
+an in-memory sample dataset instead of throwing (`isDemoMode()`). Reads and
+writes both work — approve, toggle, send all behave like a real backend — but
+nothing persists across a server restart, and nothing is emailed. It exists so
+the app is fully explorable with zero Google Cloud setup, and so this repo can
+be demonstrated without credentials.
 
-**Writes** split by destination:
+Demo mode affects **data only**. Sending is gated separately by `dry_run` in
+Config and by whether `RESEND_API_KEY`/`MAIL_FROM` are set, so the two can be
+mixed in any combination.
 
-| Action | Goes to | Why |
-|---|---|---|
-| Draft, send, generate template, preflight | **Sheets directly (+ Groq / Gmail)** | Runs in-process in `app/api/action/route.ts` — see `lib/draft.ts`, `lib/groq.ts`, `lib/gmail.ts`. No separate backend. |
-| Approve, unapprove, toggle, activate template, set template attachment, resolve error, set category | **Sheets directly** | Pure state changes. Approval in particular must never leave this process — it is the human gate. |
-| Inbox: load template into compose, AI reply draft | **Sheets directly (+ Groq)** | Pure read + a Groq call, no Sheets write — works with real Sheets too, as long as `GROQ_API_KEY` is set. |
-| Inbox: send reply | **Sheets: demo mode only. Transport: Gmail if configured, else simulated.** — see below | The Sheets write (EmailLog) needs the demo store today; the Gmail *send* is a separate, optional gate. |
-| Inbox: start a new conversation (`+ New`) | **Sheets directly, both modes** | Appends a fresh Applicants row (`appendRow()` in `lib/sheets.ts` — real `values.append` in real mode, in-memory push in demo mode) for someone not yet in the pipeline, so their thread can be opened and, if Gmail is configured, synced immediately. |
+## Where the safety gates are
 
-## Demo mode — running with zero setup
+All in `app/api/action/route.ts`:
 
-If `SHEET_ID` or `GOOGLE_SERVICE_ACCOUNT_JSON` is unset, `isDemoMode()` in
-`lib/sheets.ts` goes true and every read/write falls through to an in-memory
-sample dataset (`buildDemoStore()`) instead of talking to Google. It's seeded
-once per server process and mutates in place, so approve / toggle / send-reply
-all behave like a real backend for the life of that process — restart the dev
-server and it resets.
+| Gate | What it stops |
+|---|---|
+| `requireMailerWhenLive()` | Dry run off + no mailer → `503 E-CONFIG-MISSING`, **before** any row or log write. Never fakes a send. |
+| `config.toggle_send === false` | The Settings master switch, enforced server-side, not just in the UI. |
+| `send_daily_cap` vs EmailLog | Counted from the log, so it survives restarts. |
+| `ACTIONABLE` + the stage machine | `DRAFTED → SENT` is refused with `E-STAGE`. |
+| `FIELD_RE` leftover check | An unresolved `{{field}}` fails with `E-MAIL-TEMPLATE`. |
+| `a.sent_at` | Duplicate-send guard. |
+| `validateHtml()` | Rejects malformed or dangerous markup before it can be sent. |
 
-Demo mode and real-Sheets mode run the same code paths for `draft`, `send`,
-`template-generate` and `preflight` — the only thing that changes is whether
-`lib/sheets.ts` talks to the in-memory store or the real Google Sheets API.
-`send-reply` (the Inbox's ad-hoc reply) is the one action still demo-mode
-only on its Sheets-write side; see the table above.
+EmailLog is appended **before** the Applicants patch, deliberately: if the sheet
+write fails after a real send, the error says *"the email has already gone out —
+do not send it again"* and the audit row still exists.
 
-Every AI action needs `GROQ_API_KEY` in `dashboard/.env.local`; without it
-they fail with a clear `E-CONFIG-MISSING` rather than a silent no-op.
+## Client/server boundary
 
-### How Groq requests are actually sent
+`lib/sheets.ts`, `lib/mailer.ts`, `lib/groq.ts`, `lib/draft.ts` and
+`lib/template.ts` are marked `server-only`. Client components must import types
+from them only as `import type`, which is erased at compile time. `MailView.tsx`
+is a client component; every page under `app/` is a server component that reads
+Sheets and passes plain data down.
 
-`lib/groq.ts` is the dashboard's only model provider — no failover, no
-quota tracking, just one free-tier key. Per call, it:
+Every model call happens server-side. No API key ever reaches the browser.
 
-1. Reads `GROQ_API_KEY` (required) and `GROQ_MODEL` (defaults to
-   `llama-3.1-8b-instant`) from the server-side environment.
-2. `POST`s to `https://api.groq.com/openai/v1/chat/completions` — Groq's
-   OpenAI-compatible chat completions endpoint — with `Authorization: Bearer
-   <key>`, `temperature: 0.4`, a system message forcing JSON-only output, and
-   the caller's prompt as the user message.
-3. Extracts the outermost `{...}` from the model's reply (in case it wrapped
-   the JSON in prose) and parses it.
-4. Turns any failure — missing key, network error, non-2xx response,
-   unparsable JSON — into a `GroqError` with a stable `code`/`hint`, shown
-   verbatim in the dashboard's error banner.
+## Environment
 
-It's called from `app/api/action/route.ts` (`draft`, `template-generate`,
-Inbox's `reply-ai-draft`), always server-side only —
-`lib/groq.ts` imports `server-only`, so it can't end up in a client bundle.
-Every generated subject/body is re-rendered through `lib/template.ts`'s merge
-gate before it's shown or sent, so a model that echoes a literal `{{field}}`
-back gets caught rather than reaching a candidate.
+See `.env.example`. Summary:
 
-**If Groq calls 401 with a key that looks correct:** something else in your
-shell already has `GROQ_API_KEY` set and is shadowing `.env.local` — Next's
-env loader never overrides a variable already present in `process.env` when
-the process starts. `npm run dev` guards against this itself
-(`unset GROQ_API_KEY; next dev`), but if you run `next dev` some other way,
-check `env | grep GROQ_API_KEY` in that exact shell first.
+| Variable | Needed for |
+|---|---|
+| `DASHBOARD_PASSWORD`, `SESSION_SECRET` | Signing in. Always required. |
+| `SHEET_ID`, `GOOGLE_SERVICE_ACCOUNT_JSON` | Real data. Omit both for demo mode. |
+| `GROQ_API_KEY` | Any AI action. |
+| `RESEND_API_KEY`, `MAIL_FROM` | Real sending. Omit both to keep sends logged-only. |
+| `COMPANY_LOGO_BASE_URL` | Only if the email logo isn't served from this deployment. |
 
-## Gmail — real import & send
+## Adding a column
 
-Optional, and independent of everything above: set `GMAIL_CLIENT_ID`,
-`GMAIL_CLIENT_SECRET` and `GMAIL_REFRESH_TOKEN` and the Inbox's **Sync from
-Gmail** button pulls a candidate's real thread (searched by their email
-address), and **Send** delivers a real email — with attachments — instead of
-a simulation. Leave them unset and the Inbox behaves exactly as it does in
-demo mode, whether or not `SHEET_ID` is set: the two are independently gated,
-so you can run the pipeline data in demo mode while testing real Gmail
-against one real address.
+1. Add it to `../lib/schema.js`.
+2. Add it to `lib/contract.ts` in the **same position**.
+3. `npm test` from the repo root — `contract-parity.test.js` fails if they
+   disagree, `write-columns.test.js` fails if the route writes a column that
+   doesn't exist.
+4. `npm run bootstrap:sheets` against the real spreadsheet, or every read of
+   that tab fails with `E-SHEET-SCHEMA`.
 
-**One-time setup** (needs a human with browser access — this can't be
-scripted end to end):
+Step 4 is the one people forget. The schema check is on *reads*, so a missing
+column takes down the whole tab, not just the new feature.
 
-1. In [Google Cloud Console](https://console.cloud.google.com), same project
-   as Sheets: enable the **Gmail API**, then create an **OAuth client ID**
-   (Credentials → Create Credentials), application type **Desktop app**.
-2. Add the Gmail address you're granting access to as a **Test user** on the
-   OAuth consent screen (unless the app is published/verified).
-3. From the repo root: `npm run gmail:oauth -- <client-id> <client-secret>`.
-   It prints a consent URL — open it, approve, and the script prints the
-   three values to paste into `dashboard/.env.local`.
+## Known gaps
 
-**Safety:** Gmail being configured is not the same as consenting to send real
-mail. Both `send-reply` and the bulk `send` action check the same `dry_run`
-Config flag — real Gmail sending only happens when `dry_run` is off in
-Settings; otherwise it's logged, not delivered. There is no separate "go
-live" switch to remember — it's the one that already exists.
-
-**What's real:**
-- Import searches `to:<email> OR from:<email>` and parses each message's
-  HTML/text body and attachment metadata (`lib/gmail.ts`).
-- Send builds a real multipart MIME message (HTML + plain-text alternative,
-  plus any attached files) and calls `users.messages.send`, threaded via
-  `threadId` when replying into an imported thread.
-- Attachments: `MailView.tsx` reads local files as base64 client-side (15MB
-  total cap, enforced both client- and server-side) and sends them as normal
-  JSON fields in the `send-reply` action — no separate upload endpoint.
-  Attachments on *imported* messages download through
-  `app/api/gmail-attachment/route.ts`, which streams the real bytes back as a
-  normal browser download.
-
-**What's deliberately not built:** syncing real Gmail labels (the Inbox's
-"Group by" uses your existing `stage`/`job_role`/reply-intent fields, not
-Gmail labels), push/live updates (import is a manual click, not a
-subscription), and enterprise-grade MIME edge cases (inline images, exotic
-character sets). `lib/gmail.ts`'s `GmailError` codes (`E-GMAIL-AUTH`,
-`E-GMAIL-429`, ...) surface in the same error banner as everything else if
-something goes wrong.
-
-## The mirrored contract
-
-`lib/contract.ts` duplicates the column definitions from `../lib/schema.js`
-at the repo root, because Vercel builds this directory alone and cannot
-reach outside it.
-
-Duplication is only safe if it cannot drift silently, so
-`tests/contract-parity.test.js` at the repo root fails the build if the two
-disagree. **Change both together.**
-
-## Authentication
-
-A shared team password plus an HMAC-signed session cookie (12 hours). No OAuth
-app to register, no extra dependency, nothing to pay for.
-
-It authenticates the **team**, not the individual — which is why `approved_by`
-records `dashboard` rather than a person.
-
-Upgrade to per-user sign-in when you need attribution or clean offboarding:
-
-1. `npm i next-auth`
-2. Add the Google provider with an `allowlist` of HR email addresses in the
-   `signIn` callback.
-3. Replace `requireSession()` in `lib/auth.ts` with NextAuth's `auth()`.
-4. Set `approved_by` from the session email in `app/api/action/route.ts`.
-
-The rest of the app is unaffected — auth is only touched in those two places.
-
-## Theme
-
-Light/dark is user-controlled, not just OS-driven: the toggle button in the nav
-(top right) sets `data-theme` on `<html>` and persists the choice to
-`localStorage`, overriding `prefers-color-scheme` in either direction. A
-blocking inline script in `app/layout.tsx` applies the stored value before
-first paint, so there's no flash of the wrong theme on reload.
-
-## Local development
-
-```bash
-cp .env.example .env.local && $EDITOR .env.local
-npm install
-npm run dev          # http://localhost:3000
-npm run typecheck
-npm run build
-```
-
-Leave `SHEET_ID` / `GOOGLE_SERVICE_ACCOUNT_JSON` blank to run in demo mode (see
-above) — no Google Cloud setup needed. Add `GROQ_API_KEY` (and optionally
-`GROQ_MODEL`) too if you also want to exercise the AI features locally, and
-the three `GMAIL_*` variables (`npm run gmail:oauth` at the repo root) for
-real Gmail import/send in the Inbox — see the Gmail section above.
-
-The dashboard reads live Sheets data in dev when real credentials are set, so
-use a scratch spreadsheet if you are experimenting against production data.
-
-## Design notes
-
-- **Failures are red and inline.** A failed row shows its code and message in the
-  table.
-- **Partial success is shown as partial.** "8 succeeded, 2 failed" is not
-  rendered as a green checkmark — that is how silent breakage starts.
-- **Sending names every recipient** before it happens. There is no path from one
-  click to "email everyone".
-- **Dry run is visible on every page** that can send.
-- Theme-aware (light/dark, user-toggleable — see above), no CSS framework, no
-  client-side data fetching beyond actions.
+- One shared password rather than per-user sign-in. `lib/auth.ts` is where an
+  OAuth provider would slot in.
+- Every page reads whole tabs; no pagination.
+- No reply ingestion — candidates reply to `company_email` and a human reads it.

@@ -1,5 +1,5 @@
-import { readTabs, parseConfig, isDemoMode, SheetsError } from '../lib/sheets';
-import { isGmailConfigured } from '../lib/gmail';
+import { readTabs, parseConfig, SheetsError } from '../lib/sheets';
+import { isMailerConfigured } from '../lib/mailer';
 import { MailView } from '../components/MailView';
 import { ErrorBanner } from '../components/Pills';
 import { pluralise } from '../lib/format';
@@ -10,13 +10,13 @@ export const revalidate = 0;
 export default async function HomePage() {
   let data;
   try {
-    data = await readTabs(['Applicants', 'Templates', 'Replies', 'JobRoles', 'Config']);
+    data = await readTabs(['Applicants', 'Templates', 'Config']);
   } catch (err) {
     const e = err as SheetsError;
     return (
       <>
         <div className="eyebrow">Hiring pipeline</div>
-        <h1><span className="accent">Inbox</span></h1>
+        <h1><span className="accent">Candidates</span></h1>
         <ErrorBanner error={{ code: e.code, message: e.message, hint: e.hint }} />
       </>
     );
@@ -24,26 +24,29 @@ export default async function HomePage() {
 
   const config = parseConfig(data.Config);
   const applicants = data.Applicants;
-  const roles = data.JobRoles.filter((r) => r.is_open !== 'FALSE').map((r) => r.title).filter(Boolean);
+  // The role list is whatever roles the sheet actually contains — one less tab
+  // to keep in step, and it can never disagree with the candidate rows.
+  const roles = [...new Set(applicants.map((a) => a.job_role).filter(Boolean))].sort();
   const categories = Array.isArray(config.categories) ? config.categories as string[] : [];
 
   const count = (fn: (r: (typeof applicants)[number]) => boolean) => applicants.filter(fn).length;
   const stats = [
-    { label: 'Total', value: applicants.length, note: `${pluralise(roles.length, 'open role')}` },
+    { label: 'Total', value: applicants.length, note: `${pluralise(roles.length, 'role')}` },
     { label: 'Awaiting draft', value: count((r) => r.stage === 'NEW'), note: 'click Draft to generate' },
     { label: 'Awaiting approval', value: count((r) => r.stage === 'DRAFTED'), note: 'needs a human' },
     { label: 'Ready to send', value: count((r) => r.stage === 'APPROVED'), note: config.dry_run ? 'dry run is ON' : 'live sending' },
-    { label: 'Sent', value: count((r) => r.stage === 'SENT'), note: `${count((r) => r.stage === 'REPLIED')} replied` },
+    { label: 'Sent', value: count((r) => r.stage === 'SENT'), note: `${count((r) => r.stage === 'REPLIED')} marked replied` },
     { label: 'Needs attention', value: count((r) => Boolean(r.error_code)), note: 'failed or blocked' },
   ];
 
   return (
     <>
       <div className="eyebrow">Hiring pipeline</div>
-      <h1><span className="accent">Inbox</span></h1>
+      <h1><span className="accent">Candidates</span></h1>
       <p className="page-sub">
-        Every candidate, one place. Work the pipeline in bulk, or open a thread to reply — by
-        template, by hand, or with AI — before anything goes out.
+        Everyone in the Applicants tab, in one place. Work the pipeline in bulk, or open a
+        candidate and write to them — say what the email should cover and the model drafts it,
+        using their name and role from the sheet.
       </p>
 
       {config.dry_run ? (
@@ -54,13 +57,13 @@ export default async function HomePage() {
             <span className="hint">Sends are logged to EmailLog but no email leaves the building. Turn it off in Settings when you are ready.</span>
           </div>
         </div>
-      ) : isGmailConfigured() ? (
+      ) : isMailerConfigured() ? (
         <div className="banner warn">
           <span>!</span>
-          <div><strong>Live sending is enabled.</strong> <span className="hint">Approved drafts and Inbox replies will reach real candidates.</span></div>
+          <div><strong>Live sending is enabled.</strong> <span className="hint">Approved drafts and one-off messages will reach real candidates.</span></div>
         </div>
       ) : (
-        // Dry run off with no mailbox behind it. Every send is refused rather
+        // Dry run off with no mailer behind it. Every send is refused rather
         // than logged as though it happened, so this is a broken deployment
         // and says so at the top of the page.
         <div className="banner danger">
@@ -68,8 +71,8 @@ export default async function HomePage() {
           <div>
             <strong>Sending is broken.</strong>{' '}
             <span className="hint">
-              Dry run is off, but Gmail is not configured — every send is refused, and nothing is recorded as sent.
-              Set the three <code>GMAIL_*</code> variables (<code>npm run gmail:oauth</code>), or turn dry run back on in Settings.
+              Dry run is off, but email sending is not configured — every send is refused, and nothing is recorded as sent.
+              Set <code>RESEND_API_KEY</code> and <code>MAIL_FROM</code>, or turn dry run back on in Settings.
             </span>
           </div>
         </div>
@@ -88,11 +91,9 @@ export default async function HomePage() {
       <MailView
         applicants={applicants}
         templates={data.Templates}
-        replies={data.Replies}
         roles={roles}
         categories={categories}
-        demoMode={isDemoMode()}
-        gmailConfigured={isGmailConfigured()}
+        mailerConfigured={isMailerConfigured()}
         dryRun={config.dry_run === true}
         sendEnabled={config.toggle_send === true}
       />

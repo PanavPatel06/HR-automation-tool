@@ -150,7 +150,7 @@ export function TemplateManager({ templates, roles }: { templates: Row[]; roles:
           <p className="sub">
             Fetched fresh and attached to every email sent with this template. No upload here —
             paste a public link (Drive, Dropbox, …); nothing over{' '}
-            {/* keep in sync with MAX_ATTACHMENTS_BYTES in dashboard/lib/gmail.ts */}15MB will send.
+            {/* keep in sync with MAX_ATTACHMENTS_BYTES in dashboard/lib/mailer.ts */}15MB will send.
           </p>
           <button
             className="sm" disabled={busy !== null}

@@ -6,11 +6,10 @@
  *
  *   npm run bootstrap:sheets              create/repair
  *   npm run bootstrap:sheets -- --check   report drift, change nothing
- *   npm run seed:demo                     add demo roles, a template, 3 applicants
- *   npm run bootstrap:sheets -- --v2      include the V2 columns
+ *   npm run seed:demo                     add a default template and 3 applicants
  *
- * Requires GOOGLE_APPLICATION_CREDENTIALS (path to the service-account JSON)
- * and SHEET_ID.
+ * Requires SHEET_ID plus either GOOGLE_SERVICE_ACCOUNT_JSON (the key file
+ * inline) or GOOGLE_APPLICATION_CREDENTIALS (a path to it).
  */
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -20,12 +19,11 @@ import { createRequire } from 'node:module';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
-const { V1_TABS, columnsFor, validateHeaders, CONFIG_DEFAULTS } = require(join(ROOT, 'lib/schema.js'));
+const { TAB_NAMES, columnsFor, validateHeaders, CONFIG_DEFAULTS } = require(join(ROOT, 'lib/schema.js'));
 
 const args = process.argv.slice(2);
 const CHECK = args.includes('--check');
 const SEED = args.includes('--seed-demo');
-const V2 = args.includes('--v2') || process.env.BOOTSTRAP_V2 === 'true';
 
 const die = (msg, fix) => {
   console.error(`\n✖ ${msg}`);
@@ -93,7 +91,7 @@ async function api(fn, what) {
   }
 }
 
-const wanted = V2 ? [...V1_TABS, 'Analysis'] : V1_TABS;
+const wanted = TAB_NAMES;
 
 const meta = await api(() => sheets.spreadsheets.get({ spreadsheetId: SHEET_ID }), 'reading the spreadsheet');
 const existing = new Map(meta.data.sheets.map((s) => [s.properties.title, s.properties]));
@@ -117,14 +115,14 @@ for (const t of missingTabs) (CHECK ? drift : actions).push(`tab "${t}" ${CHECK 
 
 // --- 2. write/repair headers ------------------------------------------------
 for (const tab of wanted) {
-  const expected = columnsFor(tab, { includeV2: V2 });
+  const expected = columnsFor(tab);
   const res = await api(
     () => sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${tab}!1:1` }),
     `reading headers of "${tab}"`
   ).catch(() => ({ data: {} }));
 
   const actual = (res.data?.values?.[0]) || [];
-  const verdict = validateHeaders(tab, actual, { includeV2: V2 });
+  const verdict = validateHeaders(tab, actual);
 
   if (actual.length === 0) {
     if (!CHECK) {
@@ -173,15 +171,6 @@ for (const d of missingCfg) (CHECK ? drift : actions).push(`Config key "${d.key}
 // --- 4. optional demo data --------------------------------------------------
 if (SEED && !CHECK) {
   const now = new Date().toISOString();
-  const roles = [
-    ['ROLE-1', 'Frontend Engineer', 'Engineering', 'TRUE', now],
-    ['ROLE-2', 'Backend Engineer', 'Engineering', 'TRUE', now],
-    ['ROLE-3', 'Product Designer', 'Design', 'TRUE', now],
-  ];
-  await api(() => sheets.spreadsheets.values.append({
-    spreadsheetId: SHEET_ID, range: 'JobRoles!A:E', valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS',
-    requestBody: { values: roles },
-  }), 'seeding JobRoles');
 
   // The branded shell (logo, contact header, footer) — mirrors
   // renderSkeleton()/TEMPLATE_SKELETON in dashboard/lib/template.ts. Can't
@@ -211,38 +200,42 @@ if (SEED && !CHECK) {
     '</td></tr>',
     '</table>',
   ].join('\n');
+
+  // Column order must match TABS.Templates in lib/schema.js:
+  // template_id, name, job_role, category, subject, html, source, is_active,
+  // is_default, attachment_url, attachment_name, updated_at
   await api(() => sheets.spreadsheets.values.append({
-    spreadsheetId: SHEET_ID, range: 'Templates!A:O', valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS',
+    spreadsheetId: SHEET_ID, range: 'Templates!A:L', valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS',
     requestBody: {
       values: [[
-        'TPL-DEFAULT', 'Default outreach', '', '', 'outreach',
+        'TPL-DEFAULT', 'Default outreach', '', '',
         'Your application for {{job_role}} at {{company_name}}',
-        templateHtml, 'seed', 'TRUE', 'TRUE', 'seed.v1', '', '', now, now,
+        templateHtml, 'seed', 'TRUE', 'TRUE', '', '', now,
       ]],
     },
   }), 'seeding Templates');
 
-  // There's no intake workflow to normalise a bare row anymore, so seed each
-  // applicant fully formed: applicant_id, created_at, ..., stage, status
-  // (columns A-L). One row is deliberately invalid, to show a blocked row.
+  // Only the six columns a human ever types — the app fills in the rest.
+  // Column order: applicant_id, name, email, job_role, category, stage.
+  // One row is deliberately invalid, to show what a bad address looks like.
   await api(() => sheets.spreadsheets.values.append({
-    spreadsheetId: SHEET_ID, range: 'Applicants!A:L', valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS',
+    spreadsheetId: SHEET_ID, range: 'Applicants!A:F', valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS',
     requestBody: {
       values: [
-        ['APP-DEMO-1', now, 'Asha Menon', 'asha.demo@example.com', '', 'Frontend Engineer', 'Junior', '', '', 'manual', 'NEW', 'ok'],
-        ['APP-DEMO-2', now, 'Ravi Kumar', 'ravi.demo@example.com', '', 'Backend Engineer', 'Senior', '', '', 'manual', 'NEW', 'ok'],
-        ['APP-DEMO-3', now, 'Not An Email', 'oops-at-example', '', 'Frontend Engineer', 'Junior', '', '', 'manual', 'NEW', 'blocked'],
+        ['APP-DEMO-1', 'Asha Menon', 'asha.demo@example.com', 'Frontend Engineer', 'Junior', 'NEW'],
+        ['APP-DEMO-2', 'Ravi Kumar', 'ravi.demo@example.com', 'Backend Engineer', 'Senior', 'NEW'],
+        ['APP-DEMO-3', 'Not An Email', 'oops-at-example', 'Frontend Engineer', 'Junior', 'NEW'],
       ],
     },
   }), 'seeding demo applicants');
 
-  actions.push('seeded 3 job roles, 1 default template, 3 demo applicants (one deliberately invalid, to show a blocked row)');
+  actions.push('seeded 1 default template and 3 demo applicants (one with a deliberately invalid address)');
 }
 
 // --- report -----------------------------------------------------------------
 console.log(`\nSpreadsheet: https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit`);
 console.log(`Service account: ${serviceAccountEmail}`);
-console.log(`Mode: ${CHECK ? 'check (no writes)' : 'apply'}${V2 ? ' + V2 columns' : ''}\n`);
+console.log(`Mode: ${CHECK ? 'check (no writes)' : 'apply'}\n`);
 
 if (CHECK) {
   if (!drift.length) { console.log('✔ Sheet matches the schema.\n'); process.exit(0); }

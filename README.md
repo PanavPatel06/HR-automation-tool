@@ -1,30 +1,46 @@
-# HR Automation — V1
+# HR Automation
 
-Hiring outreach, automated end to end: applicants land in a Google Sheet, HR
-generates a role-appropriate email draft with one click, reviews and sends it
-from a dashboard, and replies come back classified.
+Hiring outreach without the copy-paste. Candidates live in a Google Sheet; you
+open one, say what the email should cover in plain English, and the model
+writes it — their name, role and your branding filled in from the sheet. You
+read it, you press Send.
 
-Runs entirely on free tiers, with no separate backend to host. **Status: V1
-complete.** V2 (resume parsing and match scoring) is planned but not built —
-see [PLAN.md](PLAN.md).
+Runs on free tiers, with no backend to host beyond the dashboard itself.
 
 > **New to JavaScript?** [LEARN.md](LEARN.md) is a Python-to-JavaScript path
 > built around this codebase. Start there rather than with a generic tutorial.
-> It predates this architecture, so some file references are stale — see the
-> note at the top of that file.
+> It predates this architecture, so some file references are stale.
 
 ```
-Google Form ─┐
-             ├─▶ Google Sheets ◀──▶ Next.js dashboard ──▶ Groq
-Manual entry ─┘   (source of truth)  (review + drafts)     │
-                        ▲                    │              │
-                        └────────────────────┴──▶ Gmail ──▶ candidate
+                    ┌───────────────┐
+   you type ───────▶│ Google Sheet  │◀──── the app writes back
+   name/email/role  │ (the database)│      drafts + send log
+                    └───────┬───────┘
+                            │
+                    ┌───────▼───────┐      ┌──────┐
+                    │   Dashboard   │─────▶│ Groq │  writes the message
+                    │   (Next.js)   │      └──────┘
+                    └───────┬───────┘
+                            │
+                    ┌───────▼───────┐
+                    │    Resend     │─────▶ candidate's inbox
+                    └───────────────┘             │
+                                                  │
+                    their reply ──────────────────┘
+                    goes to your normal mailbox,
+                    which you read like any other email
 ```
 
-The dashboard is the only server-side piece: it reads and writes the sheet
-directly, calls Groq to draft, and calls Gmail to send — all in the same
-request a person triggers by clicking a button. Nothing polls on a schedule
-and nothing runs unattended.
+The dashboard is the only server-side piece. It reads and writes the sheet
+directly, calls Groq to draft, and calls Resend to send — all in the same
+request a person triggers by clicking a button. Nothing polls on a schedule and
+nothing runs unattended.
+
+**The app does not read anyone's mailbox.** Candidates reply to a real address
+you own, and you read those replies wherever you normally read email. That is a
+deliberate trade: it removes the entire Google OAuth apparatus (Cloud project,
+consent screen, refresh tokens that silently expire after 7 days) in exchange
+for reading replies in Gmail instead of in this app.
 
 ---
 
@@ -32,12 +48,12 @@ and nothing runs unattended.
 
 | | |
 |---|---|
-| **Drafting** | Click **Draft**: picks the most specific matching template, then asks Groq to personalise it — but only for templates that opt in with `{{ai_body}}`. |
-| **Review** | Every draft is previewed and approved by a human. Nothing sends without approval. |
-| **Sending** | Click **Send**: goes via Gmail, per-recipient isolated, with a daily cap and a dry-run mode that is **on by default**. |
-| **Replies** | Open a candidate's thread in the Inbox to see what they said, reply by template, by hand, or with AI. Classification and flagging are manual for now — see [Known limitations](#known-limitations). |
-| **Observability** | Every failure has a typed code, a plain-English message, and a fix. The Console page is the whole debugging surface. |
-| **Inbox (dashboard)** | A real, per-candidate mail view: import a candidate's actual Gmail thread on demand, reply by template/manually/with AI, attach files, categorise. Optional and independent of everything above — see [Connecting real Gmail to the Inbox](#connecting-real-gmail-to-the-inbox). |
+| **Write to one candidate** | Open them, type what the email should cover, click **Write with AI**. Their name, role and category come from the sheet — you never retype them. |
+| **Bulk drafting** | Select several, click **Generate drafts**: picks the most specific matching template, then asks Groq to personalise it — but only for templates that opt in with `{{ai_body}}`. |
+| **Review** | Every message is previewed and sent by a human. The model only ever fills the compose box. |
+| **Sending** | Via Resend, per-recipient isolated, with a daily cap and a dry-run mode that is **on by default**. |
+| **Branding** | Every email — template or AI-written — is wrapped in the same letterhead shell automatically. |
+| **Observability** | Every failure has a typed code, a plain-English message and a fix. The Console page is the whole debugging surface. |
 
 ---
 
@@ -45,407 +61,100 @@ and nothing runs unattended.
 
 | | |
 |---|---|
-| **Node** | 20 or newer (developed on 25) |
-| **Google account** | For the spreadsheet and the sending mailbox |
+| **Node** | 20 or newer |
+| **Google account** | For the spreadsheet |
 | **Groq API key** | free — [console.groq.com/keys](https://console.groq.com/keys) |
-| **Vercel account** | free, for the dashboard |
-
-No server to provision and no Docker — the dashboard is the whole backend,
-and it deploys to Vercel like any Next.js app.
-
----
-
-## Quick start
-
-Full step-by-step detail is in [Deployment](#deployment) below; this is the
-skeleton.
-
-### 1. Get the code
-
-```bash
-git clone <your-repo-url> hr-automation
-cd hr-automation
-npm install
-npm test          # library tests, no credentials needed
-```
-
-### 2. Google: spreadsheet + service account
-
-1. Create a blank Google Sheet. Copy its id from the URL
-   (`docs.google.com/spreadsheets/d/`**`THIS_PART`**`/edit`).
-2. In [Google Cloud Console](https://console.cloud.google.com): new project →
-   enable **Google Sheets API** → create a **service account** → create a **JSON key**.
-3. **Share the spreadsheet with the service account's email as Editor.** This is
-   the step everyone forgets; without it every read fails with `E-SHEET-PERM`.
-
-```bash
-cp .env.example .env
-$EDITOR .env      # set SHEET_ID and GOOGLE_APPLICATION_CREDENTIALS
-
-npm run bootstrap:sheets      # creates all 9 tabs, headers and Config defaults
-npm run seed:demo             # optional: 3 roles, a default template, 3 demo applicants
-```
-
-`bootstrap:sheets` is idempotent — re-run it any time. It is also the fix for
-`E-SHEET-SCHEMA`.
-
-### 3. Dashboard
-
-```bash
-cd dashboard
-cp .env.example .env.local && $EDITOR .env.local
-npm install && npm run dev        # http://localhost:3000
-```
-
-Deploy to Vercel with **Root Directory = `dashboard`**, and set the same
-environment variables there.
-
-Leave `SHEET_ID` / `GOOGLE_SERVICE_ACCOUNT_JSON` blank to explore the dashboard
-in **demo mode** first — an in-memory sample dataset, no Google Cloud setup
-required. See [dashboard/README.md](dashboard/README.md#demo-mode--running-with-zero-setup).
-
-### 4. Dashboard's own Gmail — optional
-
-The dashboard's **Inbox** page can talk to Gmail directly — importing a
-candidate's real thread on demand and sending real mail, both the bulk Send
-action and ad-hoc replies. This is optional; skip it and sending stays
-logged-only in EmailLog, never actually delivered.
-
-```bash
-# from the repo root, after creating an OAuth client ID (Desktop app) in the
-# same Google Cloud project as step 2 — see dashboard/README.md#gmail--real-import--send
-# for the exact console steps
-npm run gmail:oauth -- <client-id> <client-secret>
-```
-
-It prints a consent URL; open it, approve, and paste the three
-`GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` / `GMAIL_REFRESH_TOKEN` values it
-prints into `dashboard/.env.local` (and into Vercel's environment variables
-for production). Full detail: [Connecting real Gmail to the Inbox](#connecting-real-gmail-to-the-inbox) below.
-
-### 5. First run
-
-1. Open the dashboard → **Console** → **Run preflight**. Everything should be green.
-2. Add a row to the Applicants tab: `applicant_id`, `name`, `email`, `job_role`
-   (must match a row in JobRoles), `stage` = `NEW`. (`npm run seed:demo` does
-   this for you.)
-3. Select it → **Draft** → review the generated email.
-4. **Approve** it.
-5. **Settings** → turn on *Sending*. Leave **dry run ON**.
-6. Select the row → **Send**. Check the EmailLog tab: a `dry_run=true` entry,
-   no email actually sent.
-7. When the dry run looks right: **Settings** → **Go live**, then send for real.
-
----
-
-## Deployment
-
-Nothing above was "local dev" versus "production" — the same steps *are* the
-deployment. Start to finish, roughly 15 minutes. Order matters — each step
-verifies the one before it. There is one deployable piece: the dashboard.
-Sheets needs no deployment of its own — it's already live the moment you
-create it.
-
-### 1. Google: spreadsheet, service account, Gmail
-
-#### 1.1 The spreadsheet
-
-Create a blank Google Sheet. From its URL:
-
-```
-https://docs.google.com/spreadsheets/d/1AbC...XyZ/edit
-                                      └──── SHEET_ID ────┘
-```
-
-#### 1.2 Service account
-
-1. [Google Cloud Console](https://console.cloud.google.com) → create a project.
-2. **APIs & Services → Library** → enable **Google Sheets API**.
-3. **APIs & Services → Credentials → Create credentials → Service account.**
-   Name it `hr-automation`. No roles needed — access comes from sharing the
-   sheet, not from IAM.
-4. Open the service account → **Keys → Add key → Create new key → JSON**.
-   Download it. This file is a credential; treat it like a password.
-5. Copy the service account's email (`hr-automation@<project>.iam.gserviceaccount.com`).
-
-#### 1.3 Share the sheet — do not skip this
-
-Open the spreadsheet → **Share** → paste the service account email → **Editor** →
-Send.
-
-Every `E-SHEET-PERM` traces back to this step.
-
-#### 1.4 Create the tabs
-
-On your laptop:
-
-```bash
-cd hr-automation
-npm install
-cp .env.example .env
-```
-
-Set in `.env`:
-
-```
-SHEET_ID=1AbC...XyZ
-GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json
-```
-
-Then:
-
-```bash
-npm run bootstrap:sheets
-npm run seed:demo          # optional but recommended for a first run
-```
-
-You should see the 9 tabs created with headers and Config defaults. Re-run any
-time — it never overwrites existing values.
-
-Verify at any point with `npm run check:sheets`, which reports drift and
-changes nothing.
-
-#### 1.5 The sending mailbox
-
-Use a real Google account HR owns — replies land in the same inbox. A
-dedicated `hiring@` account is tidier than a personal one.
-
-#### 1.6 API key
-
-| Key | Where | Notes |
-|---|---|---|
-| `GROQ_API_KEY` | [console.groq.com/keys](https://console.groq.com/keys) | Free. The dashboard's only model provider. |
-
-### 2. Dashboard
-
-The dashboard is a standard Next.js app — deploy it anywhere that runs
-Node 20+. Two options below: Render (free, one blueprint file, what this repo
-ships pre-configured for) and Vercel (also free, zero-config for Next.js).
-Either works; there is nothing else to run alongside it.
-
-#### 2.1 Local, first
-
-```bash
-cd dashboard
-cp .env.example .env.local
-$EDITOR .env.local
-npm install
-npm run dev
-```
-
-```
-SHEET_ID=                     # same as step 1
-GOOGLE_SERVICE_ACCOUNT_JSON=  # the WHOLE json file, on one line, in single quotes
-GROQ_API_KEY=                 # from 1.6
-DASHBOARD_PASSWORD=           # what the HR team will type
-SESSION_SECRET=               # openssl rand -hex 32
-```
-
-Open `http://localhost:3000` → **Console** → **Run preflight** before
-deploying anywhere. Leave `SHEET_ID`/`GOOGLE_SERVICE_ACCOUNT_JSON` blank to
-try it in demo mode first (no Google Cloud setup needed).
-
-#### 2.2 Render
-
-This repo ships `render.yaml` at its root, so Render can build the whole
-thing from a **Blueprint** without any manual service configuration:
-
-1. Push the repo to GitHub (or GitLab).
-2. [dashboard.render.com/blueprints](https://dashboard.render.com/blueprints) →
-   **New Blueprint Instance** → pick the repo. Render reads `render.yaml`
-   and creates one free web service rooted at `dashboard/`.
-3. It will prompt for the env vars marked `sync: false` in `render.yaml` —
-   paste in the same values as `.env.local` above (`GOOGLE_SERVICE_ACCOUNT_JSON`
-   pastes as raw JSON, no extra quoting needed). Blanks are fine for the ones
-   marked optional there.
-4. **Apply** — it builds with `npm install && npm run build` and starts with
-   `next start -p $PORT` (Render assigns the port; the blueprint already
-   passes it through).
-
-The blueprint pins **`branch: main`**, so a push to `main` is what deploys —
-work on a branch, merge, and the deploy follows. It also sets
-`healthCheckPath: /login`, because `/` answers 307 (redirect to sign-in) when
-signed out and Render would read that as unhealthy.
-
-Free-tier Render services **spin down after ~15 minutes idle** and take a
-few seconds to wake on the next request — fine here, since every action in
-this app is triggered by a person clicking something, not a background
-schedule waiting to be missed.
-
-If you'd rather configure it by hand instead of the blueprint: **New → Web
-Service** → same repo → **Root Directory: `dashboard`** → **Build Command:
-`npm install && npm run build`** → **Start Command: `npm start -- -p $PORT`**
-→ add the same env vars → **Create Web Service**.
-
-#### 2.3 Vercel (alternative)
-
-1. Import the repo at [vercel.com/new](https://vercel.com/new).
-2. **Root Directory → `dashboard`.** Without this the build fails.
-3. Add the same environment variables (from `dashboard/.env.example`) under
-   **Settings → Environment Variables**.
-4. Deploy.
-
-For `GOOGLE_SERVICE_ACCOUNT_JSON` paste the file contents directly into the
-value box — no quotes, no escaping. Vercel handles the newlines.
-
-### 3. Verify end to end
-
-Work through this in order against your deployed URL.
-
-| # | Do | Expect |
-|---|---|---|
-| 1 | Dashboard → **Console** → **Run preflight** | All checks green (or only the `Gmail configured` warning if you haven't set up Gmail). |
-| 2 | Add a row to Applicants: `applicant_id`, `name`, `email`, `job_role`, `stage`=`NEW`, `status`=`ok` | Appears on the dashboard as **NEW**. |
-| 3 | Select it → **Draft** | Stage becomes **DRAFTED**, with a rendered subject/body and no `{{fields}}` left. |
-| 4 | **Approve** | Stage **APPROVED**. |
-| 5 | Settings → turn on *Sending*. Keep **dry run ON**. Select → **Send** | EmailLog gets a `dry_run=true` row. **No email arrives.** |
-| 6 | Settings → **Go live** → send to your own address | The email arrives. `thread_id` is populated. |
-
-If any step fails, the code on the Console page names the cause. See
-[Runbook](#runbook), organised by symptom.
-
-### 4. Going live
-
-Everything above gets the app *running*. This is the sequence that makes it
-safe to point at real candidates. Each step is cheap to undo until the last
-one.
-
-**1. Set the identity.** Settings page — these are what candidates actually
-read, and the defaults are placeholders:
-
-| Key | Where it shows up |
-|---|---|
-| `company_name` | Every subject line, and the email footer |
-| `hr_name`, `hr_signature` | The sign-off at the bottom of the message |
-| `company_email`, `company_phone`, `company_incubator` | The letterhead block at the top of every template |
-| `categories` | The dropdown HR sorts candidates with |
-| `batch_size` | How many applicants one **Generate drafts** click processes |
-| `send_daily_cap` | Keep it under Gmail's ~500/day. 400 by default |
-
-**2. Fill JobRoles.** Nothing matches a template without it — `job_role` on an
-applicant is matched against `title` here, and a role with no match falls back
-to the default template and records a `W-TEMPLATE-DEFAULT` warning.
-
-**3. Review the templates.** Read the seeded default end to end, then add
-role-specific ones. Exactly one template should have `is_default = TRUE`, and
-every template you intend to use needs `is_active = TRUE`. Remember
-`{{ai_body}}` is the cost switch: with it, each draft spends model quota;
-without it, drafting is free and deterministic.
-
-**4. Rehearse with dry run ON.** Add two test rows to Applicants using
-addresses you own, then **Generate drafts → Approve → Dry-run send**. Check
-the EmailLog tab: you want rows with `dry_run = TRUE` and no mail anywhere.
-This exercises the whole pipeline — template matching, merge fields, the
-approval gate — with the send physically disabled.
-
-**5. Go live.** Settings → turn *Sending* on, then **Go live** (that is the
-`dry_run` switch). The toolbar button turns red and reads **Send**; the banner
-turns into a warning. Nothing else changes.
-
-**6. Send one real email to yourself first.** Confirm it arrives, the logo
-loads (mail clients hide images until you allow them), the signature is right,
-and `thread_id` / `message_id` get written back to the row. Then start on real
-candidates.
-
-**Two limits to know before you rely on it:**
-
-- **The first ad-hoc reply against the real sheet is the one to watch.** Both
-  send paths — bulk, and the per-candidate reply in the thread view — are
-  live, gated the same way, and covered by the write-column contract test. But
-  the reply path has only ever run against the demo store, so send the first
-  one to yourself with dry run on and check the row afterwards.
-- **Sign-in is a single shared password.** `approved_by` therefore records
-  `dashboard`, not a person. Fine for a small team, not an audit trail.
-
-### 5. Shipping a change
-
-Push to `main` and Render rebuilds. One extra step, only when a release adds
-a sheet column:
-
-```bash
-npm run check:sheets        # names any column the sheet is missing
-npm run bootstrap:sheets    # appends them; never touches existing values
-```
-
-The sheet is the database, and the dashboard refuses to read a tab whose
-columns don't match the contract — that's `E-SHEET-SCHEMA`, and it fails
-*every* read of that tab, not just the new feature. Run the check after
-pulling and the deploy stays boring.
-
-### 6. Keeping it running
-
-**Backups.** The spreadsheet is the data, and Google versions it
-automatically. Also back up the service-account JSON and your `.env`/env-var
-values somewhere outside the deploy platform.
-
-**Uptime, if you care about cold starts.** A free
-[UptimeRobot](https://uptimerobot.com) monitor hitting the dashboard URL
-every few minutes keeps a free Render service from spinning down between
-uses.
-
-### Costs
-
-| | |
-|---|---|
-| Render free tier / Vercel Hobby | $0 |
-| Google Sheets + Drive | $0 |
-| Groq free tier | $0 |
-| Gmail sending | $0 (~500/day) |
+| **Resend account** | free tier: 100 emails/day, 3,000/month — [resend.com](https://resend.com) |
+| **A domain** | Required by Resend to email anyone but yourself — see [Sending email](#2-sending-email-resend) |
+| **Render account** | free, for the dashboard |
 
 ---
 
 ## The spreadsheet
 
-Build it with `npm run bootstrap:sheets`, never by hand. The dashboard refuses
-to read a tab whose headers don't match the contract in `lib/schema.js` — that
-refusal is `E-SHEET-SCHEMA`, and it fails *every* read of that tab, not just
-the feature that needed the new column. The script creates all nine tabs with
-exact headers and seeds the Config defaults, and re-running it only ever
-appends what's missing.
+This is the part worth getting right, because the sheet *is* the database.
 
-### What each tab is for
+**Build it with `npm run bootstrap:sheets`, never by hand.** The dashboard
+refuses to read a tab whose headers don't match the contract in
+[lib/schema.js](lib/schema.js) — that refusal is `E-SHEET-SCHEMA`, and it fails
+*every* read of that tab, not just the feature that needed the new column. The
+script creates the four tabs with exact headers and seeds the Config defaults.
+Re-running it only ever appends what's missing; it never deletes or reorders, so
+it is always safe to re-run.
 
-| Tab | Written by | Holds |
+### Four tabs
+
+| Tab | Who writes it | What it holds |
 |---|---|---|
-| **Applicants** | you + the app | One row per candidate. The only tab you routinely type into. |
-| **Templates** | you + the app | The email shells. The app appends AI-generated ones and flips `is_active` / attachment fields. |
-| **JobRoles** | **you only** | The open roles. Template matching reads `title` from here. |
-| **Config** | you (via Settings) | Every runtime switch and merge-field value. |
-| **EmailLog** | app only | One row per send attempt, real or dry-run. Your audit trail. |
-| **Replies** | app only (marks handled) | Candidate replies, when something populates them. |
-| **Errors** | app only (marks resolved) | What the Console page reads. |
-| **RunLog**, **Quota** | nothing | Vestigial — from the earlier workflow-engine design. Leave them; they cost nothing and removing them means a schema change. |
+| **Applicants** | you, mostly | One row per candidate. The only tab you routinely type into. |
+| **Templates** | you + the app | The reusable email shells. |
+| **Config** | you, via the Settings page | Every switch and every piece of company branding. |
+| **EmailLog** | the app only | One row per send attempt, real or dry-run. Your audit trail — never type here. |
 
-### The columns you fill in
+### Applicants — the six columns you type
 
-On **Applicants**, a row only appears on the dashboard once it has an
-`applicant_id` and a `stage`. The minimum viable row:
+Columns are ordered so everything you type is on the left, before you have to
+scroll:
 
-| Column | Value |
+| # | Column | You type? | Example | Notes |
+|---|---|---|---|---|
+| A | `applicant_id` | **yes** | `APP-1001` | Any unique string. A row with no id is invisible to the app. |
+| B | `name` | **yes** | `Asha Menon` | `{{first_name}}` is the first word of this. |
+| C | `email` | **yes** | `asha@example.com` | Where the email goes. |
+| D | `job_role` | **yes** | `Frontend Engineer` | Free text. The role dropdown is built from whatever values appear in this column, so keep the spelling consistent. |
+| E | `category` | optional | `Junior` | Seniority, or any bucket you like. Drives template matching. |
+| F | `stage` | **yes** | `NEW` | Where the row is in the pipeline. |
+
+Everything from column G onward is written by the app — `template_id`,
+`email_subject`, `email_html`, `sent_at`, `error_code`, `error_message`,
+`created_at`, `updated_at`. **Don't type into those; you will be overwritten.**
+
+The minimum viable row is `applicant_id`, `email`, `stage = NEW`. Name and role
+are what make the emails good, so fill them in.
+
+### Templates
+
+| Column | Meaning |
 |---|---|
-| `applicant_id` | Any unique string — `APP-1001`, a form timestamp, anything |
-| `name`, `email` | The candidate. `email` is also what Gmail sync searches by |
-| `job_role` | Must match a `title` in JobRoles |
-| `category` | One of `categories` from Config |
-| `stage` | `NEW` |
-| `status` | `ok` |
+| `template_id` | Unique string, e.g. `TPL-DEFAULT` |
+| `name` | What you see in the dropdown |
+| `job_role`, `category` | Leave blank for a catch-all; fill in for a specialised one |
+| `subject`, `html` | The email itself, with `{{merge_fields}}` |
+| `source` | `seed` / `manual` / `ai` — informational |
+| `is_active` | `TRUE` to make it selectable |
+| `is_default` | `TRUE` on exactly one — the fallback |
+| `attachment_url`, `attachment_name` | Optional file attached on every send |
+| `updated_at` | Written by the app |
 
-Everything else — `template_id`, `email_subject`, `email_html`, `sent_at`,
-`thread_id`, `message_id`, `approved_by`, `error_*`, `updated_at` — is written
-by the app. Don't type into those; you'll be overwritten.
+### Config
+
+Five columns — `key`, `value`, `type`, `description`, `updated_at` — one row per
+setting. Edit these on the **Settings** page rather than in the sheet, so the
+types stay right. The ones that matter:
+
+| Key | Default | What it does |
+|---|---|---|
+| `dry_run` | `true` | **The safety catch.** True = sends are logged, not delivered. |
+| `toggle_send` | `false` | Master switch for sending. |
+| `toggle_draft` | `true` | Master switch for AI drafting. |
+| `send_daily_cap` | `100` | Matches Resend's free-tier daily limit. |
+| `company_email` | — | **Where candidates' replies go.** Set this to a mailbox you actually read. |
+| `company_name`, `hr_name`, `hr_signature` | — | Merge fields. |
+| `company_phone`, `company_incubator`, `company_logo_url` | — | The letterhead block. |
+| `categories` | `Intern,Junior,Mid,Senior,Lead` | Suggestions for the category box. |
 
 ### Getting candidates in
 
 There is no automated intake. Three options, in increasing order of effort:
 
-1. **Type them in.** Fine for a handful.
-2. **A Google Form on the same spreadsheet.** Form responses land in their own
+1. **Type them in**, or use the dashboard's **+ New** button — it appends a
+   properly shaped row for you.
+2. **Paste in bulk** from a CSV into columns A–F.
+3. **A Google Form on the same spreadsheet.** Form responses land in their own
    `Form Responses 1` tab, *not* in Applicants — the Form owns that tab's
    columns, so it can't be pointed at Applicants directly. Bridge it with a
    short Apps Script `onFormSubmit` trigger that appends a properly shaped row
-   (`applicant_id`, `stage = NEW`, `status = ok`) to Applicants.
-3. **Paste in bulk** from a CSV, then fill `applicant_id` / `stage` / `status`
-   down the column.
+   to Applicants.
 
 ### Making it pleasant to work in
 
@@ -453,50 +162,143 @@ None of this is required — it's what stops a shared sheet rotting:
 
 - **Freeze row 1** (View → Freeze → 1 row) on every tab.
 - **Protect the header row** (right-click → Protect range) so nobody renames a
-  column and takes the dashboard down with it. This is the single highest-value
-  thing on this list.
-- **Data validation** on `Applicants.stage` (`NEW, DRAFTED, APPROVED, SENT,
-  REPLIED, CLOSED, FAILED`), `status` (`ok, pending, failed, blocked`), and
-  `category` (whatever you set in Config). Typos here are invisible until a
-  draft silently doesn't happen.
-- **Conditional formatting** on `stage` so the pipeline is readable at a glance.
+  column and takes the dashboard down with it. Highest-value item on this list.
+- **Data validation** on `stage` (`NEW, DRAFTED, APPROVED, SENT, REPLIED,
+  CLOSED, FAILED`) and `category`. Typos here are invisible until a draft
+  silently doesn't happen.
+- **Conditional formatting** on `stage`, so the pipeline reads at a glance.
 - **Filter views** rather than filters — a filter view is per-person, so two
   people looking at once don't fight over the sort order.
-- **Archive** `SENT` / `CLOSED` rows to a separate sheet once a quarter. Every
-  dashboard page reads the whole tab, so a few thousand rows is where it starts
-  feeling slow.
-- **Version history** is your backup (File → Version history). The sheet *is*
-  the database; also keep the service-account JSON somewhere safe and separate.
+- **Archive** `SENT` / `CLOSED` rows to another sheet once a quarter. Every page
+  reads the whole tab, so a few thousand rows is where it starts feeling slow.
+- **Version history** is your backup (File → Version history). Keep the
+  service-account JSON somewhere safe and separate.
 
-### Getting the most out of template matching
+---
 
-`selectTemplate()` scores every active template and the most specific one wins:
+## Setup
 
-| Template has | Score |
-|---|---|
-| `job_role` matches the candidate | +4 |
-| `job_role` set but **doesn't** match | −10 (disqualifying) |
-| `category` matches | +2 |
-| `category` set but doesn't match | −5 |
-| `is_default = TRUE` | +1 |
+### 1. Google: spreadsheet + service account
 
-`stage` on a template filters before scoring (`outreach` is the default). So:
-leave `job_role`/`category` blank for a catch-all, fill them in for a
-specialised one, and keep exactly one default as the safety net. A candidate
-whose role matches nothing gets the default plus a `W-TEMPLATE-DEFAULT`
-warning in the result banner — that warning is your signal to write a
-role-specific template.
+1. Create a spreadsheet. Copy its id from the URL — the part between `/d/` and
+   `/edit`. That is `SHEET_ID`.
+2. In [console.cloud.google.com](https://console.cloud.google.com), create a
+   project, enable the **Google Sheets API**, then go to **IAM & Admin →
+   Service Accounts → Create**. Give it any name; no roles needed.
+3. On the service account, **Keys → Add key → JSON**. A file downloads. Its
+   contents are `GOOGLE_SERVICE_ACCOUNT_JSON` — treat it like a password.
+4. Open that JSON, copy the `client_email` value, then **Share** the spreadsheet
+   with that address as **Editor**. Skipping this is the cause of
+   `E-SHEET-PERM`.
+
+No OAuth consent screen, no user login, no token expiry — a service account is
+just a key that works until you revoke it.
+
+### 2. Sending email (Resend)
+
+1. Sign up at [resend.com](https://resend.com).
+2. **Add a domain** at [resend.com/domains](https://resend.com/domains) and add
+   the DNS records it shows you (SPF, DKIM — usually a couple of TXT/CNAME
+   records at your registrar). This is not optional: **until a domain is
+   verified, Resend only delivers to the email address that owns the account.**
+   Verification usually takes minutes once DNS propagates.
+3. **API Keys → Create**, with *Sending access*. That is `RESEND_API_KEY`.
+4. Set `MAIL_FROM` to an address at that verified domain, e.g.
+   `3Space Hiring <hiring@3space.in>`.
+5. On the **Settings** page, set `company_email` to the mailbox you want
+   candidates' replies to land in. It is sent as the `Reply-To` header, so
+   replies reach a human even though nothing sends *from* that mailbox.
+
+If `RESEND_API_KEY` or `MAIL_FROM` is missing while dry run is off, the app
+**refuses every send** with `E-CONFIG-MISSING` rather than pretending. See
+[Safety properties](#safety-properties).
+
+### 3. Dashboard, locally
+
+```bash
+git clone <your-repo> && cd hr-automation
+npm install
+cd dashboard && npm install
+
+cp .env.example .env.local
+# fill in SHEET_ID, GOOGLE_SERVICE_ACCOUNT_JSON, GROQ_API_KEY,
+# DASHBOARD_PASSWORD, SESSION_SECRET (openssl rand -hex 32)
+# leave RESEND_API_KEY blank for now
+
+cd .. && npm run bootstrap:sheets   # creates the four tabs
+npm run seed:demo                   # optional: one template + 3 fake candidates
+
+cd dashboard && npm run dev         # http://localhost:3000
+```
+
+**With `SHEET_ID` left blank the app runs on a built-in sample dataset** — fully
+clickable, nothing persisted, nothing sent. Good for exploring before committing
+to any Google setup.
+
+### 4. Deploy to Render
+
+The repo has a [render.yaml](render.yaml) blueprint, so this is mostly clicking.
+
+1. Push to GitHub.
+2. Render dashboard → **New → Blueprint** → pick the repo. Render reads
+   `render.yaml`, creates one web service, and prompts for each secret.
+3. Fill in: `DASHBOARD_PASSWORD`, `SESSION_SECRET`, `SHEET_ID`,
+   `GOOGLE_SERVICE_ACCOUNT_JSON` (paste the whole JSON as-is — no quotes, no
+   escaping), `GROQ_API_KEY`, `RESEND_API_KEY`, `MAIL_FROM`.
+4. Deploy. The first build takes a few minutes.
+
+Render sets `RENDER_EXTERNAL_URL` itself, which is how emails find the logo at
+`/brand/logo.png`. You only need `COMPANY_LOGO_BASE_URL` if the logo should be
+served from somewhere else.
+
+**The free plan sleeps after 15 minutes idle**, so the first request after a
+quiet spell takes ~30 seconds. Fine for an internal tool; upgrade if it annoys.
+
+### 5. Verify, then go live
+
+On the **Console** page, click **Run preflight**. Every check must pass.
+
+Then, with `dry_run` still ON:
+
+1. Add yourself as a candidate.
+2. Draft and send. Nothing is delivered; a row appears in the Email Log marked
+   *dry run*.
+
+Then go live:
+
+1. Settings → turn **Sending** on.
+2. Settings → turn **dry run** off.
+3. Run preflight again — the mailer check is now a *hard* failure if anything is
+   missing.
+4. Send one real email **to yourself**. If it arrives, every other send uses the
+   identical code path.
+
+---
 
 ## Everyday use
 
 | Task | Where |
 |---|---|
-| Add applicants | The Applicants tab, or a Google Form pointed at it. Give each new row an `applicant_id`, `stage` = `NEW`, and `status` = `ok` — see [Known limitations](#known-limitations). |
-| Change email wording | **Templates** page — upload HTML or generate one. |
-| Approve and send | **Inbox** page — work the list in bulk, or open one candidate. |
-| See what candidates said, reply | **Inbox** page — open a candidate's thread. |
-| Something is wrong | **Console** page. Start with **Run preflight**. |
+| Add candidates | The Applicants tab, or **+ New** in the dashboard |
+| Write to one person | Open them, type the brief, **Write with AI** |
+| Bulk outreach | Select several → **Generate drafts** → **Approve** → **Send** |
+| Change email wording | **Templates** page |
+| Something is wrong | **Console** page → **Run preflight** |
 | Turn Drafting/Sending off | **Settings** page. Takes effect on the next click, no redeploy. |
+
+### Writing to one candidate
+
+This is the main flow. Pick someone, then:
+
+- **What should this email say?** — a plain-English brief. *"Invite her to a
+  30-minute intro call next week, mention it's remote, ask for two time slots."*
+  You never type her name or role; those come from the sheet.
+- **Base it on a template** (optional) — used as a style reference, not copied.
+- **Write with AI** fills the subject and body, wrapped in the branded shell.
+- Edit anything you like, preview, then **Send**.
+
+**Use template as-is** skips the model entirely and just fills the merge fields
+— free, instant, deterministic.
 
 ### Templates and the AI opt-in
 
@@ -509,301 +311,152 @@ A template is plain HTML with `{{merge_fields}}`:
 ```
 
 `{{ai_body}}` is the switch. **With it**, Groq writes 2–4 personalised
-paragraphs for each candidate when you click **Draft**. **Without it**, the
+paragraphs per candidate when you click **Generate drafts**. **Without it**, the
 template renders deterministically and costs zero tokens. Since the free-tier
-daily token budget is the real constraint, this is how you decide where
+token budget is the real constraint, this is how you decide where
 personalisation is worth spending it.
 
 Available fields: `first_name` `name` `email` `job_role` `category`
-`company_name` `hr_name` `hr_signature` `ai_body` `company_email`
-`company_phone` `company_incubator`.
+`applicant_id` `company_name` `hr_name` `hr_signature` `ai_body`
+`company_email` `company_phone` `company_incubator` `company_logo_url`.
 
 An email with an unresolved `{{field}}` is **never sent** — it fails as
 `E-MAIL-TEMPLATE` first. `Hi {{first_name}},` reaching a candidate is worse than
 a visible error.
 
+### Template matching
+
+`selectTemplate()` scores every active template; the most specific one wins:
+
+| Template has | Score |
+|---|---|
+| `job_role` matches the candidate | +4 |
+| `job_role` set but **doesn't** match | −10 (disqualifying) |
+| `category` matches | +2 |
+| `category` set but doesn't match | −5 |
+| `is_default = TRUE` | +1 |
+
+Leave `job_role`/`category` blank for a catch-all, fill them in for a
+specialised one, and keep exactly one default as the safety net. A candidate
+whose role matches nothing gets the default plus a `W-TEMPLATE-DEFAULT` warning
+in the result banner — that warning is your signal to write a role-specific
+template.
+
 ### The branded skeleton
 
-Every template — the seed default and every AI-generated one — is wrapped in
-the same shell, following the company letterhead: monochrome, square-cornered,
+Every template — the seed default and every AI-generated one — is wrapped in the
+same shell, following the company letterhead: monochrome, square-cornered,
 hairline rules, wide-tracked caps. A black top strip, the logo with a contact
 block opposite it (`{{company_email}}` / `{{company_phone}}` /
-`{{company_incubator}}`), a rule, the message, then a small uppercase footer
-line. It's table-based with every style inline rather than a `<style>` block,
-which is the only markup that renders identically in Gmail, Outlook, and
-everything else.
+`{{company_incubator}}`), a rule, the message, then a small-caps footer.
 
-`renderSkeleton()` in `dashboard/lib/template.ts` does the wrapping — the AI
-template-generation prompt only ever writes the message paragraphs, never the
-header/footer, so branding can't drift between templates or get mangled by a
-model. Edit `TEMPLATE_SKELETON` there to change the look (and its hand-mirror
-in `scripts/bootstrap-sheets.mjs`'s seed — see the comment on `templateHtml`
-for why it's duplicated). The contact fields are ordinary Config values,
-editable in **Settings** exactly like `company_name`.
+It is table-based with inline styles, because that is the only thing every mail
+client renders the same way. `<style>` blocks and `<svg>` are stripped by Gmail;
+data-URI images are unreliable. The logo is therefore a real PNG served from the
+deployment at `/brand/logo.png`.
 
-**The logo.** It lives at `dashboard/public/brand/logo.png` and needs no
-setup — templates reference `{{company_logo_url}}`, and `resolveLogoUrl()`
-resolves that per send to `<deployment origin>/brand/logo.png`, reading the
-origin Render and Vercel already publish (`RENDER_EXTERNAL_URL` /
-`VERCEL_URL`). Set `company_logo_url` in **Settings** only to point somewhere
-else; `COMPANY_LOGO_BASE_URL` overrides the origin if it's ever guessed wrong.
-
-Two things that look like details and are not:
-
-- `/brand/*` sits outside the session gate in `middleware.ts`, because mail
-  clients fetch images anonymously — behind the gate the logo reaches
-  candidates as a broken image.
-- The URL resolves per send rather than being baked into each stored
-  template, so moving the dashboard to a new domain doesn't strand templates
-  that were already generated. `resolveLogoUrl()` never returns empty: an
-  unresolved merge field fails the send closed, and a missing logo is not a
-  reason to stop an email going out.
-
-To swap the artwork, overwrite `logo.png` — trimmed, transparent, ~450px
-wide (it renders at 150px; the extra pixels are for retina). See
-`dashboard/public/brand/README.md`.
-
-Hand-written templates (uploaded or typed directly into the Templates tab)
-are untouched — the skeleton only wraps the seed template and new AI drafts,
-so nothing rewrites HTML a person already reviewed and activated.
+The model never writes this shell — it writes the message body only, and
+`renderSkeleton()` wraps it. That is why an AI-written email and a stored
+template look identical in a candidate's inbox.
 
 ### Attaching a file to a template
 
-Open a template's preview on the **Templates** page and paste a file's URL
-(e.g. a Google Drive link shared **"Anyone with the link"**) into
-**Attachment URL**, then **Save attachment**. That file is fetched fresh and
-attached to every email sent with that template — bulk **Send** and the
-Inbox's per-candidate send both carry it, with no per-applicant upload.
-
-There's no file upload in the dashboard itself: it stores a link (`Templates`
-column `attachment_url`, plus optional `attachment_name` for the filename
-shown to the recipient), not the bytes, so this needs no extra Google API
-scope beyond what Sheets/Gmail already use. Same 15MB cap as manual Inbox
-attachments (`MAX_ATTACHMENTS_BYTES` in `dashboard/lib/gmail.ts`); a link that
-returns an error or a too-large file fails the send with `E-ATTACHMENT-FETCH`
-or `E-VALIDATION` rather than sending without it.
-
----
-
-## Connecting real Gmail to the Inbox
-
-Setup is [step 4](#4-dashboards-own-gmail--optional) above. This is what it
-actually does once connected.
-
-**It loads one candidate's conversation, on demand — not your whole mailbox.**
-Open a candidate's thread in the Inbox and click **⟳ Sync from Gmail**: the
-dashboard searches Gmail for `to:<their email> OR from:<their email>`, pulls
-every matching message (up to 20, oldest first), and merges them into that
-one thread view. Nothing loads automatically on page load, nothing polls in
-the background, and no other candidate's mail is touched. That's deliberate —
-it's a single, narrow query per click rather than a standing subscription, so
-there's no push-notification infrastructure to run (no Cloud Pub/Sub topic,
-no public webhook endpoint, no watch-renewal cron) and no risk of pulling in
-mail that has nothing to do with hiring.
-
-If you want it to feel more automatic, two easy upgrades exist without adding
-any new infrastructure — ask if you want either built:
-- **Sync on open** — call the same sync automatically the moment you select a
-  candidate, instead of requiring the button click.
-- **Sync all** — a bulk action that loops the same per-candidate search over
-  every applicant with an email. Fine for tens of candidates; for hundreds,
-  Gmail's API quota means it should run in batches, not all at once.
-
-A true always-on inbox (new mail appears without any click at all) needs
-Gmail's push notifications (`users.watch` + a Cloud Pub/Sub topic + a public
-HTTPS endpoint to receive them, re-registered every 7 days) — a real feature,
-not a config change, and out of scope unless you want it as a dedicated
-follow-up.
-
-**Sheet structure — nothing extra needed.** The Applicants tab already has
-everything this depends on:
-
-| Column | Role in Gmail sync |
-|---|---|
-| `email` | The only thing sync searches by. As long as a row has a real address, its thread can be pulled in — no matter how that row was created (form, manual entry, or the Inbox's own "+ New" button for someone not yet in the pipeline). |
-| `thread_id`, `message_id` | Filled in automatically the first time you send for real from that row. Used to keep a reply in the *same* Gmail thread instead of starting a new one. Blank until then — sync doesn't need them, it always searches by address. |
-
-So the practical workflow for a real inbound email from someone not yet an
-applicant: add them with the Inbox's **+ New** button (name + email is
-enough), then **Sync from Gmail** on their new thread to pull in what they
-already sent. No sheet changes, no import script.
+On the **Templates** page, open a template's preview and paste a public URL
+(e.g. a Drive "anyone with the link" share) plus a filename. The sheet stores
+the *link*, not the bytes. It's fetched fresh at send time, so replacing the
+linked file takes effect on the next send with no template edit. 15MB cap; an
+unreachable link fails the send with `E-ATTACHMENT-FETCH` rather than sending
+without it.
 
 ---
 
 ## Architecture
 
-How the pieces fit, and the reasoning behind the choices that are not obvious.
+### Where logic lives
 
-```
-  Google Form ──┐
-                ├──▶  Google Sheets  ◀──────────────┐
-  Manual entry ─┘     (source of truth)             │
-                             ▲                       │ read
-                             │ read/write            │
-              ┌──────────────┴────────────────────┐  │
-              │        Next.js dashboard           │  │
-              │        (Vercel free tier)          │  │
-              │  Draft   ──▶ Groq                  │  │
-              │  Send    ──▶ Gmail ───▶ candidate ─┘  │
-              │  Inbox   ◀── Gmail ◀── (reply, on demand)
-              │  Preflight, approve, settings — all in-process
-              └─────────────────────────────────────┘
-```
-
-### The two actors
+| File | Responsibility |
+|---|---|
+| [lib/schema.js](lib/schema.js) | **Single source of truth** for tabs, columns, the stage machine, Config defaults |
+| [dashboard/lib/contract.ts](dashboard/lib/contract.ts) | Hand-mirror of the above (the dashboard deploys from `dashboard/` alone and can't import outside it). `tests/contract-parity.test.js` fails the build if they drift |
+| [dashboard/lib/sheets.ts](dashboard/lib/sheets.ts) | All Sheets I/O, plus the demo dataset |
+| [dashboard/lib/mailer.ts](dashboard/lib/mailer.ts) | All outbound email (Resend, over plain `fetch` — no SDK) |
+| [dashboard/lib/template.ts](dashboard/lib/template.ts) | Merge-field rendering, HTML validation, template selection, the branded skeleton |
+| [dashboard/lib/draft.ts](dashboard/lib/draft.ts) | Batch selection, the draft prompt, the schema gate on model output |
+| [dashboard/lib/groq.ts](dashboard/lib/groq.ts) | The only model provider |
+| [dashboard/app/api/action/route.ts](dashboard/app/api/action/route.ts) | Every mutating action, and every safety gate |
 
 **Google Sheets is the source of truth.** Not a cache, not a mirror. If the
 dashboard is down, HR can still see every candidate and work by hand in the
-sheet directly. That property is worth more than the performance a real
-database would buy at this scale.
-
-**The dashboard is the whole backend.** It reads and writes Sheets, calls
-Groq to draft, and calls Gmail to send — all inside the same request a
-person triggers by clicking a button. There is no separate service holding
-secrets or running on a schedule; every side effect happens because a human
-clicked something, in the request that click made.
-
-This is a deliberate simplification from an earlier design that split
-"trigger" (dashboard) from "does the side effect" (a workflow engine) across
-two deployed services connected by a signed webhook. That split earns its
-keep once there's scheduled, unattended work — polling a mailbox, watching
-for new form rows — which V1 does not have: every action here is a person
-looking at a screen and clicking a button, so the two-service split was
-pure overhead. See [Known limitations](#known-limitations) for what that
-trade gives up (no automated intake, no scheduled reply polling).
-
-### Where logic lives
-
-```
-lib/schema.js              the sheet contract: tabs, columns, the stage machine
-scripts/                    sheet bootstrap, Gmail OAuth setup
-dashboard/                  the whole app — Next.js, deploys to Vercel/Render
-  app/api/action/route.ts     every mutating action — draft, send, approve, ...
-  lib/contract.ts             the same contract, mirrored by hand (see below)
-  lib/template.ts             merge-field rendering, HTML validation, template selection
-  lib/draft.ts                batch selection + the Groq prompt/schema gate for Draft
-  lib/groq.ts                 the Groq client
-  lib/gmail.ts                the Gmail client
-tests/                      library tests, no network or credentials required
-prompts/                    every prompt, versioned
-```
-
-`lib/schema.js` at the repo root is the single source of truth for the
-sheet's tab names, columns and stage machine — read by
-`scripts/bootstrap-sheets.mjs` and the tests. The dashboard deploys from
-`dashboard/` alone and cannot import outside that directory, so
-`dashboard/lib/contract.ts` duplicates the same definitions by hand;
-`tests/contract-parity.test.js` fails the build if the two ever drift apart.
-
-```bash
-npm test                    # library tests
-cd dashboard && npm run typecheck && npm run build   # the app itself
-```
+sheet directly. That property is worth more than the performance a real database
+would buy at this scale.
 
 ### The stage machine
 
 ```
 NEW ──▶ DRAFTED ──▶ APPROVED ──▶ SENT ──▶ REPLIED ──▶ CLOSED
  │         │            │          │
- └─────────┴────────────┴──────────┴────▶ FAILED ──▶ (back to origin on retry)
+ └─────────┴────────────┴──────────┴──▶ FAILED ──▶ (back to origin)
 ```
 
-`DRAFTED → SENT` is **not** a legal transition. Approval is a mandatory,
-separate, human-only step, enforced in two places: `ACTIONABLE` in
-`dashboard/lib/contract.ts` (what the UI will even attempt) and the `send`
-action's own per-row stage check in `route.ts` (what actually runs, even if
-someone calls the API directly). Two checks because it is the rule that
-matters most.
-
-### The AI layer
-
-`lib/groq.ts` is the dashboard's only model provider: one function, one
-free-tier key, no failover and no quota ledger. That's a real simplification
-from a design with a Groq→Gemini failover chain and a persisted token-bucket
-ledger — worth it at V1's volume (a few dozen drafts a day), and Groq
-returns a plain rate-limit error if it isn't, rather than failing silently.
-Add a second provider here if that ever actually bites.
-
-Templates opt into AI per-field with `{{ai_body}}`: a template without it
-renders deterministically and costs zero tokens, so quota is spent only
-where personalisation matters — see `usesAi()` in `dashboard/lib/draft.ts`.
-
-Every generated subject/body is re-rendered through the same merge-field
-gate a hand-written template goes through (`renderEmail()` in
-`dashboard/lib/template.ts`) before it's shown or sent, so a model that
-echoes a literal `{{field}}` back gets caught rather than reaching a
-candidate.
+`DRAFTED → SENT` is illegal: approval is mandatory and enforced server-side, not
+just hidden in the UI. `REPLIED` is set by hand — you move a row there after
+reading the candidate's answer in your own inbox.
 
 ### Trust boundaries
 
-| Boundary | Control |
-|---|---|
-| Browser → dashboard | Signed session cookie, HMAC-verified server-side |
-| Dashboard → Google Sheets | Service account scoped to one spreadsheet |
-| Dashboard → Gmail | OAuth on the HR mailbox (optional; unset and sending stays logged-only) |
-| Model output → candidate | Schema check, then template render, then HTML validation, then human approval |
-
-The last row is the important one: **three gates between what a model
-writes and what a candidate reads**, the last of which is a person.
+- **The model never decides anything.** It writes prose. Approving and sending
+  are human actions, enforced server-side.
+- **Model output is validated before it can reach a candidate**: JSON shape,
+  allowed tags, no `{{placeholders}}`, no `<script>`/`<iframe>`, length cap.
+- **Merge rendering is fail-closed.** An unresolved field blocks the send.
+- **Secrets live only in the environment.** `.env.local` is gitignored; only
+  `.env.example` is tracked.
+- **`/brand/*` is deliberately public** so email clients can load the logo. Put
+  nothing sensitive there.
 
 ### What is deliberately not automated
 
-- **Approval.** Every email is read by a human first.
-- **Rejection.** No candidate is auto-rejected. V2 scoring will rank, not decide.
-- **Follow-ups.** Nothing nags a silent candidate automatically.
-- **Reply classification and intake normalisation.** Both were background
-  jobs in an earlier design; for now, reading a reply and adding an
-  applicant are both direct, manual actions in the dashboard — see
-  [Known limitations](#known-limitations).
-
-Each of these is cheap to automate and expensive to get wrong. A wrongly
-auto-rejected strong candidate is an invisible loss — no error, no alert,
-just a worse hire six weeks later.
-
-### What V2 adds
-
-V2 inserts two stages in front of the existing pipeline and reuses everything
-else:
-
-```
-NEW ──▶ PARSED ──▶ SCORED ──▶ SHORTLISTED ──▶ DRAFTED ──▶ … (V1 unchanged)
-```
-
-The columns are already declared in `lib/schema.js` marked `v2: true`, and
-the bootstrap creates them with `--v2`. V2 columns only ever *append*, so V1
-column positions never move. See [PLAN.md](PLAN.md) §6.
+- **Approval.** A human reads every email before it goes.
+- **Intake.** No scraper, no inbox parser. Rows arrive because someone put them
+  there.
+- **Reading replies.** They land in a real mailbox and a human reads them.
+- **Anything on a timer.** Every action starts with a click.
 
 ---
 
 ## Safety properties
 
-These are enforced in code, not just intended:
+These are enforced in code, not just intended. They are the invariants worth
+protecting when changing anything:
 
-- **A broken mailbox stops the line; it never fakes a send.** With dry run off
-  and Gmail unconfigured, every send is refused with `E-CONFIG-MISSING` —
-  no row moves to SENT, nothing is written to EmailLog, the dashboard shows a
-  red *Sending is broken* banner, and preflight fails. The one thing this
-  system must never do is report an email as sent that no candidate will ever
-  receive.
-
-- **Nothing sends without human approval.** `DRAFTED → SENT` is not a legal transition; approval is a separate, human-only step.
-- **Dry run ships ON**, and Sending ships OFF in Settings.
-- **Bulk send names every recipient** in the request — there is no one-click "email everyone".
-- **Unresolved merge fields block the send.**
-- **One bad applicant never aborts a batch** — item-level isolation in both Draft and Send.
-- **A model never decides an outcome.** It drafts; approving, rejecting and sending are human actions.
+1. **Nothing sends without a human click.** The model only fills the compose box.
+2. **`DRAFTED → SENT` is impossible.** Approval is enforced server-side.
+3. **Dry run ships ON and `toggle_send` ships OFF.** A fresh deployment cannot
+   email anyone by accident.
+4. **A broken mailer stops the line; it never fakes a send.** Dry run off with no
+   `RESEND_API_KEY` returns `503 E-CONFIG-MISSING` *before* any row or log line
+   is written, shows a red *Sending is broken* banner, and fails preflight. The
+   one thing this system must never do is report an email as sent that no
+   candidate will ever receive.
+5. **EmailLog is written before the pipeline state.** A send that isn't in the
+   log is a send somebody repeats.
+6. **One failed recipient never aborts a batch** — and never leaves that row
+   looking sent. It stays `APPROVED` and retryable, with `result: failed` logged.
+7. **An unresolved `{{field}}` blocks the send.**
+8. **Already-sent rows are refused.** `sent_at` is the duplicate guard.
+9. **Bulk send names every recipient** in the request — there is no one-click
+   "email everyone".
+10. **The daily cap is counted from EmailLog, not an in-memory counter**, so it
+    survives restarts.
 
 ---
 
 ## Error codes
 
-Every failure carries one of these codes, a plain-English message, and a fix.
-They're defined per concern, right where they're thrown: `SheetsError` in
-`dashboard/lib/sheets.ts`, `GroqError` in `dashboard/lib/groq.ts`,
-`GmailError` in `dashboard/lib/gmail.ts`, `TemplateError` in
-`dashboard/lib/template.ts`. Codes appear inline in the dashboard's
-action-result banners, and in the `error_code` column on `Applicants` for
-rows a bulk Draft/Send has touched.
+Every failure carries a code, a plain-English message and a fix. They're defined
+where they're thrown: `SheetsError` in `dashboard/lib/sheets.ts`, `GroqError` in
+`dashboard/lib/groq.ts`, `MailerError` in `dashboard/lib/mailer.ts`,
+`TemplateError` in `dashboard/lib/template.ts`.
 
 ```
 E-MAIL-TEMPLATE
@@ -812,265 +465,165 @@ E-MAIL-TEMPLATE
 └───────── E = error, W = warning (recorded, never fatal)
 ```
 
-There's no automatic retry or failover layer — a failed action reports its
-code and stops; the human who clicked the button decides whether to try
-again. Batch actions (Draft, Send) isolate failures per row: one bad
-applicant never blocks the rest of the batch.
+There is no automatic retry or failover layer — a failed action reports its code
+and stops; the human who clicked decides whether to try again.
 
-### E-SHEET-* — Google Sheets
+### `E-SHEET-*` — Google Sheets
 
 | Code | Cause | Fix |
 |---|---|---|
-| `E-SHEET-PERM` | No access to the spreadsheet, or it doesn't exist | Share the spreadsheet with the service account email as **Editor**. The single most common setup mistake. |
+| `E-SHEET-PERM` | No access to the spreadsheet, or it doesn't exist | Share it with the service-account email as **Editor**. The most common setup mistake. |
 | `E-SHEET-SCHEMA` | A column is missing | `npm run bootstrap:sheets`. It appends missing columns without touching data. |
-| `E-SHEET-429` | Rate limit | Wait a moment and refresh. Usually several tabs open at once. |
+| `E-SHEET-429` | Rate limit | Wait and refresh. Usually several tabs open at once. |
 
-### E-CONFIG-* — setup
-
-| Code | Cause | Fix |
-|---|---|---|
-| `E-CONFIG-MISSING` | A required environment variable is absent (`SHEET_ID`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GROQ_API_KEY`, ...) | See `dashboard/.env.example`. Run **Console → Run preflight** for the full list. |
-| `E-CONFIG-CRED` | A credential is present but invalid — malformed JSON, or Groq unreachable | Check the value is pasted correctly, and that outbound network access works. |
-
-### E-LLM-* — the model layer (Groq)
+### `E-CONFIG-*` — setup
 
 | Code | Cause | Fix |
 |---|---|---|
-| `E-LLM-HTTP` | Groq returned a non-2xx response | Check `GROQ_API_KEY` and that the model id (`GROQ_MODEL`) is still current. |
-| `E-LLM-JSON` | Groq's response wasn't parseable JSON | Usually transient — try the action again. |
-| `E-LLM-SCHEMA` | The parsed JSON didn't pass the draft/reply schema check (missing subject, disallowed tag, leftover `{{placeholder}}`, ...) | A prompt or model-output problem, not a data problem. Try again; if it recurs for the same applicant, an unusual character in their name or role may be confusing the prompt. |
-| `E-LLM-EMPTY` | Groq returned nothing usable | Try again. |
+| `E-CONFIG-MISSING` | A required environment variable is absent | Run **Console → Run preflight** for the full list. On a send it means dry run is off with no mailer configured — **nothing was sent and nothing was logged as sent**. |
+| `E-CONFIG-CRED` | `GOOGLE_SERVICE_ACCOUNT_JSON` isn't valid JSON | Re-paste the whole key file. |
+| `E-CONFIG` | A master switch is off | Turn it on in Settings. |
 
-### E-MAIL-* — templates and sending
-
-| Code | Cause | Fix |
-|---|---|---|
-| `E-MAIL-TEMPLATE` | Unresolved `{{field}}`, invalid HTML structure, or an empty subject | **Nothing was sent.** Fix the template or add the missing value. This check exists so `Hi {{first_name}},` never reaches a candidate. |
-
-The Send action also rejects a row inline (without a shared error code, just
-a message) for: wrong stage, no draft body, an undeliverable-looking
-address, already sent, or the daily cap reached.
-
-### E-GMAIL-* — sending transport
+### `E-MAIL-*` — sending
 
 | Code | Cause | Fix |
 |---|---|---|
-| `E-GMAIL-AUTH` | OAuth refresh token revoked or scope insufficient | Re-run `npm run gmail:oauth` and update `GMAIL_REFRESH_TOKEN`. |
-| `E-GMAIL-429` | Gmail rate limit | Wait a moment and try again. |
-| `E-VALIDATION` | Attachments exceed the size cap | Trim attachments to under the limit shown in the message. |
-| `E-ATTACHMENT-FETCH` | A template's `attachment_url` was unreachable or returned a non-2xx status when sending | Confirm the link is shared "Anyone with the link" and loads without signing in. |
+| `E-MAIL-AUTH` | Resend rejected the API key | Check `RESEND_API_KEY`; regenerate one with *Sending access*. |
+| `E-MAIL-DOMAIN` | The sender domain isn't verified | Verify it at resend.com/domains and point `MAIL_FROM` at it. **The most common first-send failure** — until then Resend only delivers to your own account address. |
+| `E-MAIL-429` | Rate limit | Free tier is 100/day and 2 requests/second. |
+| `E-MAIL-NETWORK` | Couldn't reach Resend at all | **Ambiguous — the mail may or may not have been accepted.** Check resend.com/emails before retrying, so you don't send a duplicate. |
+| `E-MAIL-TEMPLATE` | Unresolved `{{field}}`, invalid HTML, or an empty subject | **Nothing was sent.** Fix the template or supply the missing value. |
+| `E-ATTACHMENT-FETCH` | A template's `attachment_url` was unreachable | Confirm the link is shared "Anyone with the link" and loads without signing in. |
 
-### Request-level codes
+### `E-LLM-*` — the model layer (Groq)
 
-Returned directly by `app/api/action/route.ts` for a malformed or
-out-of-order request, before anything is read or written:
+| Code | Cause | Fix |
+|---|---|---|
+| `E-LLM-HTTP` | Groq returned a non-2xx response | Check `GROQ_API_KEY` and that `GROQ_MODEL` is still a current model id. |
+| `E-LLM-JSON` | Response wasn't parseable JSON, or failed the merge/HTML gate | Usually transient — try again. |
+| `E-LLM-SCHEMA` | Parsed JSON failed the draft schema check | Try again; if it recurs for the same person, an unusual character in their name or role may be confusing the prompt. |
+| `E-LLM-EMPTY` | Groq returned nothing usable | Try again, or write it manually. |
+
+### Request-level
 
 | Code | Cause |
 |---|---|
 | `E-AUTH` | Session expired — sign in again. |
-| `E-BADREQ` | Request is missing a required field (e.g. no applicants selected). |
-| `E-STAGE` | A bulk action (approve/unapprove) was attempted on rows not in a legal stage for it. |
-| `E-QUOTA` | The day's `send_daily_cap` is used up. Resumes tomorrow, or raise it in Settings — Gmail itself stops around 500/day. |
-| `E-CONFIG-MISSING` (on a send) | Dry run is off but Gmail is not configured. **Nothing was sent and nothing was logged as sent.** Fix the `GMAIL_*` variables, or turn dry run back on. |
+| `E-BADREQ` | Missing a required field (no applicant selected, no brief and no template, ...). |
+| `E-STAGE` | A bulk action was attempted on rows not in a legal stage for it. |
+| `E-QUOTA` | The day's `send_daily_cap` is used up. Resumes tomorrow, or raise it in Settings — Resend's free tier itself stops at 100/day. |
+| `E-VALIDATION` | Attachments exceed the size cap, or Resend rejected the payload. |
 | `E-NOTFOUND` | The applicant/template/config key named in the request doesn't exist. |
-| `E-NOT-IMPLEMENTED` | An Inbox action that only works in demo mode was called against a real spreadsheet (ad-hoc reply sending — see [Known limitations](#known-limitations)). |
+| `E-UNKNOWN` | An unclassified failure. Check the Render logs for the stack trace. Seeing it repeatedly means a failure mode worth its own typed code. |
 
-### W-* — warnings
-
-Recorded for audit. Nothing is broken.
+### `W-*` — warnings
 
 | Code | Means |
 |---|---|
 | `W-TEMPLATE-DEFAULT` | No role-specific template matched, so the default was used — a more generic email than intended. |
 
-### E-UNKNOWN
-
-An unclassified failure. The raw message is shown in the error banner —
-check the server logs (Render/Vercel function logs) for the full stack trace.
-
-Seeing this repeatedly for the same action means a failure mode worth giving
-its own typed code.
-
 ---
 
 ## Runbook
 
-Organised by symptom. For code definitions see [Error codes](#error-codes)
-above.
+### Emails are not sending
 
-**Always start here:** Dashboard → **Console** → **Run preflight**. It checks
-every credential, environment variable and Config key without writing or
-sending anything, and most problems are config drift.
+In order:
+
+1. **Console → Run preflight.** It names the broken credential.
+2. **Settings → is Sending on?** It ships off.
+3. **Settings → is dry run off?** Dry run logs without delivering, by design.
+4. **Red banner saying "Sending is broken"?** Dry run is off but the mailer
+   isn't configured. Set `RESEND_API_KEY` and `MAIL_FROM`. Nothing has been
+   falsely recorded as sent.
+5. **`E-MAIL-DOMAIN`?** Your domain isn't verified on Resend, so it will only
+   deliver to your own account address.
+6. **Rows stuck at `APPROVED` with errors in the Email Log?** Read the
+   `error_message` column — that's the reason, per recipient.
 
 ### Applicants are not appearing
 
-There is no automated intake step — a new row only appears on the dashboard
-once it has an `applicant_id` and a `stage`.
-
-1. **Did you set both?** Add the row directly to the Applicants tab with
-   `applicant_id`, `name`, `email`, `job_role`, `stage` = `NEW`, `status` =
-   `ok` already filled in. `npm run seed:demo` shows the exact shape.
-2. **`job_role` matches JobRoles?** Not enforced automatically — if you want
-   the row to show up with a valid role, `job_role` should match a `title`
-   in the JobRoles tab.
-3. **Wrong tab or a typo in a header cell?** `E-SHEET-SCHEMA` on the next
-   read means a column name drifted — `npm run bootstrap:sheets` repairs it.
+A row needs an `applicant_id` and at least one non-empty cell. Check it isn't
+being hidden by the role/stage/category filter dropdowns.
 
 ### Draft is not generating
 
-1. **Settings → is *Drafting* on?**
-2. **Is there an active template?** Templates page — at least one must be
-   `active`, and one should be `default`. Without a match you get
-   `E-MAIL-TEMPLATE: No template matches role "X" and no default template is set`.
-3. **`GROQ_API_KEY` set?** Run preflight — it's the first check.
-4. **`E-LLM-SCHEMA` or an HTTP error?** The model returned unusable JSON, or
-   Groq rejected the request (bad key, rate limit). Click **Draft** again —
-   drafting is per-applicant, so one failure doesn't block the rest of the
-   batch.
+Check `GROQ_API_KEY` in preflight; check **Drafting** is on in Settings; check
+the row's stage is `NEW`, `DRAFTED` or `FAILED`.
 
-### Emails are not sending
+### "Write with AI" is greyed out
 
-Work down this list — it is ordered by likelihood.
-
-1. **Is *dry run* on?** Settings page. Dry runs write a `dry_run=true` row to
-   EmailLog and send nothing. This is the intended default.
-2. **Settings → is *Sending* on?** Ships off.
-3. **Is the row `APPROVED`?** `DRAFTED` is not enough — approval is a
-   separate, deliberate step. The Send action reports "not APPROVED" for
-   any row that isn't.
-4. **Unresolved `{{field}}` in the draft?** Nothing was sent, by design —
-   fix the template or regenerate the draft.
-5. **Daily cap hit** (`send_daily_cap`, default 400)? Resumes tomorrow.
-6. **`E-GMAIL-AUTH`?** The OAuth refresh token expired or was revoked.
-   Re-run `npm run gmail:oauth` and update `GMAIL_REFRESH_TOKEN`.
-7. **Gmail not configured at all?** Sends stay logged-only forever — that's
-   fine for evaluating the pipeline, but nothing actually leaves. Set
-   `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` / `GMAIL_REFRESH_TOKEN` to send
-   for real.
-8. **One recipient failed, the rest went out?** Working as intended —
-   per-recipient isolation. That row stays `APPROVED` and is retryable.
-
-### Replies are not showing up
-
-There is no automated reply watcher. Open the **Inbox** on a candidate's
-thread and click **⟳ Sync from Gmail** — it searches for messages to/from
-that address on demand. There's nothing to poll or wait for; if the message
-genuinely isn't in the mailbox this pulls from, sync will find nothing to
-show.
+It needs either a brief in the instructions box or a selected template — the
+same check the server enforces. There is nothing for the model to work from
+otherwise.
 
 ### The dashboard shows an error banner
 
-| Message | Cause | Fix |
-|---|---|---|
-| *Permission denied reading the "X" tab* | Sheet not shared | Share with the service account as Editor |
-| *missing column(s)* | Schema drift | `npm run bootstrap:sheets` |
-| *GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON* | Truncated or escaped paste | Paste the whole file, unescaped |
-| *GROQ_API_KEY is not set* | Missing env var | Add it to the dashboard environment and redeploy |
-| *Gmail is not configured* | Missing Gmail env vars | Optional — set the three `GMAIL_*` vars, or ignore and stay in logged-only mode |
-
-### An action reports partial success
-
-*"Partly done — 8 succeeded, 2 failed"* is a normal outcome, not a bug. The
-response's `errors` array names each one; the successes are already
-committed to the sheet.
+`E-SHEET-SCHEMA` means the sheet drifted from the contract — run
+`npm run bootstrap:sheets`. It is the fix for *every* schema error, and it is
+always safe to re-run.
 
 ### Recovering a stuck row
 
-| Situation | Do |
-|---|---|
-| Stuck in `FAILED` | Fix the underlying cause, then select it and **Draft** again. `FAILED` rows are eligible for drafting. |
-| Sent by mistake | You cannot unsend. Set `stage` to `CLOSED` and handle it by hand. |
-| Draft looks wrong | **Unapprove**, then **Draft** again — it overwrites the draft. |
-| Reprocess from scratch | Clear `stage` and `status`, set `stage` back to `NEW`. |
+Edit the sheet directly. Set `stage` back to `NEW` and clear `email_subject`,
+`email_html`, `sent_at`, `error_code`, `error_message`. The dashboard picks it up
+on the next read.
 
 ### Changing the AI's behaviour
 
-Edit the prompt in `dashboard/lib/draft.ts` (`buildDraftPrompt`) or the
-inline prompt strings in `dashboard/app/api/action/route.ts`
-(`reply-ai-draft`, `template-generate`), bump the version string alongside
-it, then:
-
-```bash
-cd dashboard && npm run typecheck && npm run build
-```
-
-To change the model, edit `GROQ_MODEL` in the environment (defaults to
-`llama-3.1-8b-instant`) — no code change needed.
+The prompts are inline in
+[dashboard/app/api/action/route.ts](dashboard/app/api/action/route.ts) (the
+one-off composer and template generation) and
+[dashboard/lib/draft.ts](dashboard/lib/draft.ts) (bulk drafting). Change the
+wording, redeploy. The schema gate that validates the output is
+`checkDraftSchema()` — tighten that, not the prompt, if the model keeps emitting
+something it shouldn't.
 
 ### Rotating a secret
 
-| Secret | How |
-|---|---|
-| `GROQ_API_KEY` | Update the dashboard's env var and redeploy. |
-| Service account key | Create a new key, update `GOOGLE_APPLICATION_CREDENTIALS` locally and `GOOGLE_SERVICE_ACCOUNT_JSON` on the deploy platform. Delete the old key last. |
-| `DASHBOARD_PASSWORD` | Change it on the deploy platform and redeploy. Existing sessions survive up to 12 hours; also change `SESSION_SECRET` to invalidate them immediately. |
-| `GMAIL_REFRESH_TOKEN` | Re-run `npm run gmail:oauth` and update the three `GMAIL_*` values. |
-
-### Deliberately breaking things (fault injection)
-
-Worth doing once before you trust the system. Each should produce the named
-code, visible in the action's error banner, with nothing else disturbed:
-
-| Break this | Expect |
-|---|---|
-| Set `GROQ_API_KEY` to something wrong, click Draft | `E-LLM-*` on that applicant; other applicants in the batch still draft |
-| Add `{{interview_date}}` to a template, then Draft/Send | `E-MAIL-TEMPLATE`, **nothing sent** |
-| Approve a row, corrupt its email address, Send | Rejected for that row only — "is not a deliverable address" |
-| Rename a column in the Applicants tab | `E-SHEET-SCHEMA` on the next read |
-| Select two applicants for Send, one not `APPROVED` | Partial success — the eligible one sends, the other is reported rejected |
-
-If any of these fails silently instead, that is a bug worth fixing before
-going live.
+Update it in Render's environment, redeploy, then revoke the old one. For the
+Google key: create a new service-account key, update the env var, redeploy,
+*then* delete the old key.
 
 ---
 
-## Capacity and cost
-
-Everything is free-tier. The binding constraint is **tokens per day**, not
-requests per minute.
-
-A personalised draft costs roughly 1,800 tokens. On the Groq free tier that is
-comfortably **50+ drafts per day**. Static templates (no `{{ai_body}}`) cost
-nothing and are unlimited.
-
-Gmail sends about 500/day on a consumer account; `send_daily_cap` in Config
-defaults to 400 to stay under it.
-
----
-
-## Documentation
-
-Deployment, architecture, error codes, and the runbook are all above, in this
-file. What's left as its own doc:
+## Costs
 
 | | |
 |---|---|
-| **[LEARN.md](LEARN.md)** | A path from basic Python to working on this codebase, taught with real code from this repo. Predates this architecture — see the note at its top. |
-| [PLAN.md](PLAN.md) | V1 and V2 plan, architecture decisions, open questions |
-| [dashboard/README.md](dashboard/README.md) | Dashboard internals, the auth upgrade path, and the dashboard's own Gmail integration in full detail |
-| [prompts/](prompts/) | Every prompt, versioned, with the reasoning |
+| Google Sheets | free |
+| Groq | free tier; only `{{ai_body}}` templates and **Write with AI** spend tokens |
+| Resend | free: 100 emails/day, 3,000/month |
+| Render | free (sleeps when idle) |
+| **Total** | **₹0/month** at this volume |
+
+The binding constraint is Resend's 100 emails/day. `send_daily_cap` defaults to
+match it.
+
+---
+
+## Development
+
+```bash
+npm test                                    # contract + schema tests
+cd dashboard && npx tsc --noEmit            # typecheck
+cd dashboard && npm run build               # production build
+npm run check:sheets                        # report sheet drift, change nothing
+```
+
+The tests are the guardrail that matters: `contract-parity.test.js` and
+`write-columns.test.js` catch the column drift that would otherwise surface as
+`E-SHEET-SCHEMA` in production, mid-send.
 
 ---
 
 ## Known limitations
 
-- **New applicants are added directly to the Applicants tab** (by hand or by
-  pointing a Google Form at it), with `applicant_id`, `stage` = `NEW`, and
-  `status` = `ok` set on the row. There is no automated intake step that
-  validates, normalises or deduplicates a bare row — `npm run seed:demo`
-  shows the shape a row needs.
-- **Reply classification and follow-up flagging are manual.** Open the Inbox
-  to read what a candidate said; nothing auto-classifies intent or flags a
-  silent candidate for you.
-- **Ad-hoc replies have not been exercised against a real spreadsheet yet.**
-  The demo-only guard is gone and the path is production-shaped — it obeys
-  *Sending* and `send_daily_cap`, writes EmailLog before touching the
-  applicant row, and reports honestly if the sheet write fails after the mail
-  is away. Every write it makes uses columns the contract test enforces, and
-  the code path is identical in both modes (only `lib/sheets.ts` branches).
-  Still: the first real-sheet reply deserves a dry run and a look at the row
-  afterwards.
-- **Dashboard auth is a shared team password**, not per-user sign-in. It
-  authenticates the team, so `approved_by` records `dashboard` rather than a
-  person. Upgrade path in [dashboard/README.md](dashboard/README.md).
-- **No resume parsing or match scoring** — that is V2.
+- **Replies are not shown in the app.** They arrive in whatever mailbox
+  `company_email` points at. This is the deliberate trade described at the top.
+- **No automated intake.** Rows arrive because someone put them there.
+- **One shared password** rather than per-user sign-in.
+- **No reply classification.** The `REPLIED` stage is set by hand.
+- **Free-tier Render sleeps**, so the first request after idle is slow.
+- **Every page reads whole tabs.** A few thousand rows is where it slows down;
+  archive `SENT`/`CLOSED` rows periodically.

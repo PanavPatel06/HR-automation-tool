@@ -1,7 +1,8 @@
 'use strict';
 /**
  * The dashboard deploys from `dashboard/` alone and cannot import outside it,
- * so `dashboard/lib/contract.ts` duplicates lib/schema.js's column contract.
+ * so `dashboard/lib/contract.ts` duplicates lib/schema.js's column contract and
+ * its Config defaults.
  *
  * Duplication is only safe if it cannot drift silently. This test is what makes
  * it safe: if a column is added on one side and not the other, the build fails
@@ -13,7 +14,7 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 
-const { TABS, columnsFor, V1_TABS, STAGE, TRANSITIONS, CONFIG_DEFAULTS } = require('../lib/schema');
+const { TABS, columnsFor, TAB_NAMES, STAGE, TRANSITIONS, CONFIG_DEFAULTS } = require('../lib/schema');
 
 const CONTRACT_TS = readFileSync(join(__dirname, '..', 'dashboard', 'lib', 'contract.ts'), 'utf8');
 
@@ -25,8 +26,8 @@ function tabColumnsFromTs(tab) {
   return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
 }
 
-test('every V1 tab in the dashboard contract matches lib/schema.js exactly', () => {
-  for (const tab of V1_TABS) {
+test('every tab in the dashboard contract matches lib/schema.js exactly', () => {
+  for (const tab of TAB_NAMES) {
     const fromTs = tabColumnsFromTs(tab);
     assert.ok(fromTs, `dashboard/lib/contract.ts is missing the "${tab}" tab`);
     assert.deepEqual(
@@ -37,13 +38,12 @@ test('every V1 tab in the dashboard contract matches lib/schema.js exactly', () 
   }
 });
 
-test('the dashboard declares every V1 tab and no V2 ones', () => {
+test('the dashboard declares exactly the four tabs and no others', () => {
   // Scope to the TABS block — ACTIONABLE below it has the same key: [...] shape.
   const block = CONTRACT_TS.match(/export const TABS = \{([\s\S]*?)\n\} as const;/);
   assert.ok(block, 'TABS block not found in the dashboard contract');
   const declared = [...block[1].matchAll(/^\s{2}(\w+):\s*\[/gm)].map((m) => m[1]);
-  assert.deepEqual(declared.sort(), [...V1_TABS].sort(), 'the dashboard must declare exactly the V1 tabs');
-  assert.ok(!declared.includes('Analysis'), 'Analysis is a V2 tab and must not appear in the V1 dashboard');
+  assert.deepEqual(declared.sort(), [...TAB_NAMES].sort(), 'the dashboard must declare exactly the tabs in lib/schema.js');
 });
 
 test('the dashboard stage list matches the stage machine in lib/schema.js', () => {
@@ -51,12 +51,7 @@ test('the dashboard stage list matches the stage machine in lib/schema.js', () =
   assert.ok(m, 'STAGES not found in the dashboard contract');
   const dashboardStages = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
 
-  // V1 stages only; V2 adds PARSED/SCORED/SHORTLISTED/REJECTED.
-  const v1Stages = ['NEW', 'DRAFTED', 'APPROVED', 'SENT', 'REPLIED', 'CLOSED', 'FAILED'];
-  assert.deepEqual(dashboardStages, v1Stages);
-  for (const s of dashboardStages) {
-    assert.ok(Object.values(STAGE).includes(s), `dashboard stage "${s}" is not in the lib/schema.js stage machine`);
-  }
+  assert.deepEqual(dashboardStages.sort(), Object.values(STAGE).sort());
 });
 
 test('dashboard bulk actions only permit stages the stage machine allows', () => {
@@ -77,7 +72,9 @@ test('dashboard bulk actions only permit stages the stage machine allows', () =>
 });
 
 test('every toggle the dashboard shows exists as a Config default', () => {
-  const keys = [...CONTRACT_TS.matchAll(/key:\s*'(toggle_\w+)'/g)].map((m) => m[1]);
+  const block = CONTRACT_TS.match(/export const TOGGLES = \[([\s\S]*?)\n\] as const;/);
+  assert.ok(block, 'TOGGLES not found in the dashboard contract');
+  const keys = [...block[1].matchAll(/key:\s*'(\w+)'/g)].map((m) => m[1]);
   assert.ok(keys.length >= 2, 'expected at least the two bulk-action toggles');
   const known = new Set(CONFIG_DEFAULTS.map((d) => d.key));
   for (const k of keys) {
@@ -85,9 +82,21 @@ test('every toggle the dashboard shows exists as a Config default', () => {
   }
 });
 
+test('the dashboard CONFIG_DEFAULTS mirror lib/schema.js key for key', () => {
+  // The demo dataset is seeded from the dashboard copy, so a drifted key here
+  // means exploring the app shows settings a real sheet would never have.
+  const block = CONTRACT_TS.match(/export const CONFIG_DEFAULTS = \[([\s\S]*?)\n\] as const;/);
+  assert.ok(block, 'CONFIG_DEFAULTS not found in the dashboard contract');
+  const keys = [...block[1].matchAll(/key:\s*'([^']+)'/g)].map((m) => m[1]);
+  assert.deepEqual(keys, CONFIG_DEFAULTS.map((d) => d.key), 'Config key drift between lib/schema.js and dashboard/lib/contract.ts');
+
+  const values = [...block[1].matchAll(/value:\s*'([^']*)'/g)].map((m) => m[1]);
+  assert.deepEqual(values, CONFIG_DEFAULTS.map((d) => d.value), 'Config default values drifted between the two files');
+});
+
 test('lib/schema.js has no duplicate column names within a tab', () => {
   for (const tab of Object.keys(TABS)) {
-    const cols = columnsFor(tab, { includeV2: true });
+    const cols = columnsFor(tab);
     assert.equal(new Set(cols).size, cols.length, `duplicate column in "${tab}"`);
   }
 });
