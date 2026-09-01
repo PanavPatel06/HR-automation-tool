@@ -23,7 +23,7 @@ Runs on free tiers, with no backend to host beyond the dashboard itself.
                     └───────┬───────┘
                             │
                     ┌───────▼───────┐
-                    │    Resend     │─────▶ candidate's inbox
+                    │  SMTP (Gmail) │─────▶ candidate's inbox
                     └───────────────┘             │
                                                   │
                     their reply ──────────────────┘
@@ -32,15 +32,18 @@ Runs on free tiers, with no backend to host beyond the dashboard itself.
 ```
 
 The dashboard is the only server-side piece. It reads and writes the sheet
-directly, calls Groq to draft, and calls Resend to send — all in the same
+directly, calls Groq to draft, and sends over SMTP — all in the same
 request a person triggers by clicking a button. Nothing polls on a schedule and
 nothing runs unattended.
 
-**The app does not read anyone's mailbox.** Candidates reply to a real address
-you own, and you read those replies wherever you normally read email. That is a
-deliberate trade: it removes the entire Google OAuth apparatus (Cloud project,
-consent screen, refresh tokens that silently expire after 7 days) in exchange
-for reading replies in Gmail instead of in this app.
+**The app does not read anyone's mailbox.** It sends *from* a real Gmail account
+over SMTP, so replies land in that account's inbox and you read them there like
+any other email — and every send also appears in its Sent folder.
+
+That is a deliberate trade. Sending this way needs no Google Cloud project, no
+OAuth consent screen, no refresh token that expires after seven days, and no
+domain of your own. The whole setup is: turn on 2-Step Verification, generate a
+16-character App Password, paste it in.
 
 ---
 
@@ -51,7 +54,7 @@ for reading replies in Gmail instead of in this app.
 | **Write to one candidate** | Open them, type what the email should cover, click **Write with AI**. Their name, role and category come from the sheet — you never retype them. |
 | **Bulk drafting** | Select several, click **Generate drafts**: picks the most specific matching template, then asks Groq to personalise it — but only for templates that opt in with `{{ai_body}}`. |
 | **Review** | Every message is previewed and sent by a human. The model only ever fills the compose box. |
-| **Sending** | Via Resend, per-recipient isolated, with a daily cap and a dry-run mode that is **on by default**. |
+| **Sending** | Over SMTP, per-recipient isolated, with a daily cap and a dry-run mode that is **on by default**. |
 | **Branding** | Every email — template or AI-written — is wrapped in the same letterhead shell automatically. |
 | **Observability** | Every failure has a typed code, a plain-English message and a fix. The Console page is the whole debugging surface. |
 
@@ -64,8 +67,8 @@ for reading replies in Gmail instead of in this app.
 | **Node** | 20 or newer |
 | **Google account** | For the spreadsheet |
 | **Groq API key** | free — [console.groq.com/keys](https://console.groq.com/keys) |
-| **Resend account** | free tier: 100 emails/day, 3,000/month — [resend.com](https://resend.com) |
-| **A domain** | Required by Resend to email anyone but yourself — see [Sending email](#2-sending-email-resend) |
+| **A Gmail account** | The one that sends, and receives replies. **Personal, not Workspace** — see below |
+| **Nothing else** | No domain, no email provider account, no DNS records |
 | **Render account** | free, for the dashboard |
 
 ---
@@ -138,7 +141,7 @@ types stay right. The ones that matter:
 | `dry_run` | `true` | **The safety catch.** True = sends are logged, not delivered. |
 | `toggle_send` | `false` | Master switch for sending. |
 | `toggle_draft` | `true` | Master switch for AI drafting. |
-| `send_daily_cap` | `100` | Matches Resend's free-tier daily limit. |
+| `send_daily_cap` | `400` | Kept under Gmail's ~500 recipients/day. |
 | `company_email` | — | **Where candidates' replies go.** Set this to a mailbox you actually read. |
 | `company_name`, `hr_name`, `hr_signature` | — | Merge fields. |
 | `company_phone`, `company_incubator`, `company_logo_url` | — | The letterhead block. |
@@ -214,22 +217,42 @@ None of this is required — it's what stops a shared sheet rotting:
 No OAuth consent screen, no user login, no token expiry — a service account is
 just a key that works until you revoke it.
 
-### 2. Sending email (Resend)
+### 2. Sending email (Gmail App Password)
 
-1. Sign up at [resend.com](https://resend.com).
-2. **Add a domain** at [resend.com/domains](https://resend.com/domains) and add
-   the DNS records it shows you (SPF, DKIM — usually a couple of TXT/CNAME
-   records at your registrar). This is not optional: **until a domain is
-   verified, Resend only delivers to the email address that owns the account.**
-   Verification usually takes minutes once DNS propagates.
-3. **API Keys → Create**, with *Sending access*. That is `RESEND_API_KEY`.
-4. Set `MAIL_FROM` to an address at that verified domain, e.g.
-   `3Space Hiring <hiring@3space.in>`.
-5. On the **Settings** page, set `company_email` to the mailbox you want
-   candidates' replies to land in. It is sent as the `Reply-To` header, so
-   replies reach a human even though nothing sends *from* that mailbox.
+No domain, no provider signup, nothing that expires:
 
-If `RESEND_API_KEY` or `MAIL_FROM` is missing while dry run is off, the app
+1. On the Gmail account that should send — e.g. `3spacetechcorp@gmail.com` —
+   turn on **2-Step Verification**
+   ([myaccount.google.com/security](https://myaccount.google.com/security)).
+   You cannot generate an App Password without it.
+2. Go to
+   [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords),
+   name it `hr-dashboard`, and **Create**.
+3. Google shows a 16-character password as four groups of four. Copy it and
+   **remove the spaces** — it is shown once.
+4. Set `MAIL_USER` to the Gmail address and `MAIL_PASSWORD` to that App
+   Password.
+
+```bash
+MAIL_USER=3spacetechcorp@gmail.com
+MAIL_PASSWORD=abcdefghijklmnop          # 16 chars, no spaces
+MAIL_FROM=3Space Hiring <3spacetechcorp@gmail.com>   # optional display name
+```
+
+> **Personal Gmail only.** Google Workspace accounts cannot use App Passwords —
+> Google requires OAuth 2.0 for those. If the sending account is on Workspace,
+> either use a personal Gmail for sending, or point `MAIL_HOST`/`MAIL_PORT` at a
+> different SMTP server.
+
+Nothing here is Gmail-specific. `MAIL_HOST` and `MAIL_PORT` default to
+`smtp.gmail.com:465` but point anywhere — a company mail server, a paid relay —
+so outgrowing Gmail is an environment change, not a code change. Port 465 is
+implicit TLS; 587 is STARTTLS.
+
+Replies go to the sending account by default. Set `company_email` in **Settings**
+only if they should land somewhere else — it becomes the `Reply-To`.
+
+If `MAIL_USER` or `MAIL_PASSWORD` is missing while dry run is off, the app
 **refuses every send** with `E-CONFIG-MISSING` rather than pretending. See
 [Safety properties](#safety-properties).
 
@@ -243,7 +266,7 @@ cd dashboard && npm install
 cp .env.example .env.local
 # fill in SHEET_ID, GOOGLE_SERVICE_ACCOUNT_JSON, GROQ_API_KEY,
 # DASHBOARD_PASSWORD, SESSION_SECRET (openssl rand -hex 32)
-# leave RESEND_API_KEY blank for now
+# leave MAIL_PASSWORD blank for now
 
 cd .. && npm run bootstrap:sheets   # creates the four tabs
 npm run seed:demo                   # optional: one template + 3 fake candidates
@@ -264,7 +287,7 @@ The repo has a [render.yaml](render.yaml) blueprint, so this is mostly clicking.
    `render.yaml`, creates one web service, and prompts for each secret.
 3. Fill in: `DASHBOARD_PASSWORD`, `SESSION_SECRET`, `SHEET_ID`,
    `GOOGLE_SERVICE_ACCOUNT_JSON` (paste the whole JSON as-is — no quotes, no
-   escaping), `GROQ_API_KEY`, `RESEND_API_KEY`, `MAIL_FROM`.
+   escaping), `GROQ_API_KEY`, `MAIL_USER`, `MAIL_PASSWORD`.
 4. Deploy. The first build takes a few minutes.
 
 Render sets `RENDER_EXTERNAL_URL` itself, which is how emails find the logo at
@@ -288,8 +311,10 @@ Then go live:
 
 1. Settings → turn **Sending** on.
 2. Settings → turn **dry run** off.
-3. Run preflight again — the mailer check is now a *hard* failure if anything is
-   missing.
+3. Run preflight again. The mailbox check **opens a real SMTP connection and
+   authenticates**, so a green tick here means the credentials genuinely work —
+   not merely that the variables are set. It is a *hard* failure once dry run
+   is off.
 4. Send one real email **to yourself**. If it arrives, every other send uses the
    identical code path.
 
@@ -406,7 +431,7 @@ without it.
 | [lib/schema.js](lib/schema.js) | **Single source of truth** for tabs, columns, the stage machine, Config defaults |
 | [dashboard/lib/contract.ts](dashboard/lib/contract.ts) | Hand-mirror of the above (the dashboard deploys from `dashboard/` alone and can't import outside it). `tests/contract-parity.test.js` fails the build if they drift |
 | [dashboard/lib/sheets.ts](dashboard/lib/sheets.ts) | All Sheets I/O, plus the demo dataset |
-| [dashboard/lib/mailer.ts](dashboard/lib/mailer.ts) | All outbound email (Resend, over plain `fetch` — no SDK) |
+| [dashboard/lib/mailer.ts](dashboard/lib/mailer.ts) | All outbound email (SMTP via nodemailer, pooled) |
 | [dashboard/lib/template.ts](dashboard/lib/template.ts) | Merge-field rendering, HTML validation, template selection, the branded skeleton |
 | [dashboard/lib/draft.ts](dashboard/lib/draft.ts) | Batch selection, the draft prompt, the schema gate on model output |
 | [dashboard/lib/groq.ts](dashboard/lib/groq.ts) | The only model provider |
@@ -461,7 +486,7 @@ protecting when changing anything:
 3. **Dry run ships ON and `toggle_send` ships OFF.** A fresh deployment cannot
    email anyone by accident.
 4. **A broken mailer stops the line; it never fakes a send.** Dry run off with no
-   `RESEND_API_KEY` returns `503 E-CONFIG-MISSING` *before* any row or log line
+   `MAIL_PASSWORD` returns `503 E-CONFIG-MISSING` *before* any row or log line
    is written, shows a red *Sending is broken* banner, and fails preflight. The
    one thing this system must never do is report an email as sent that no
    candidate will ever receive.
@@ -515,10 +540,10 @@ and stops; the human who clicked decides whether to try again.
 
 | Code | Cause | Fix |
 |---|---|---|
-| `E-MAIL-AUTH` | Resend rejected the API key | Check `RESEND_API_KEY`; regenerate one with *Sending access*. |
-| `E-MAIL-DOMAIN` | The sender domain isn't verified | Verify it at resend.com/domains and point `MAIL_FROM` at it. **The most common first-send failure** — until then Resend only delivers to your own account address. |
-| `E-MAIL-429` | Rate limit | Free tier is 100/day and 2 requests/second. |
-| `E-MAIL-NETWORK` | Couldn't reach Resend at all | **Ambiguous — the mail may or may not have been accepted.** Check resend.com/emails before retrying, so you don't send a duplicate. |
+| `E-MAIL-AUTH` | SMTP rejected the login (`535`) | You used the Google account password instead of an App Password, 2-Step Verification is off, or the 16 characters were pasted with spaces. **The most common first-send failure.** |
+| `E-MAIL-429` | The server is throttling | Gmail's daily quota — about 500 recipients over a rolling 24 hours on a personal account. It resumes on its own. |
+| `E-MAIL-REJECTED` | The recipient was rejected (`550`/`553`) | A mistyped or dead address. Fix it in the candidate's **Email** box. |
+| `E-MAIL-NETWORK` | Could not reach the mail server | Check `MAIL_HOST`/`MAIL_PORT`. 465 needs implicit TLS, 587 needs STARTTLS — a mismatch hangs rather than erroring cleanly. Nothing was sent. |
 | `E-MAIL-TEMPLATE` | Unresolved `{{field}}`, invalid HTML, or an empty subject | **Nothing was sent.** Fix the template or supply the missing value. |
 | `E-ATTACHMENT-FETCH` | A template's `attachment_url` was unreachable | Confirm the link is shared "Anyone with the link" and loads without signing in. |
 
@@ -538,8 +563,8 @@ and stops; the human who clicked decides whether to try again.
 | `E-AUTH` | Session expired — sign in again. |
 | `E-BADREQ` | Missing a required field (no applicant selected, no brief and no template, ...). |
 | `E-STAGE` | A bulk action was attempted on rows not in a legal stage for it. |
-| `E-QUOTA` | The day's `send_daily_cap` is used up. Resumes tomorrow, or raise it in Settings — Resend's free tier itself stops at 100/day. |
-| `E-VALIDATION` | Attachments exceed the size cap, Resend rejected the payload, or an edited email address is malformed or already on another row. |
+| `E-QUOTA` | The day's `send_daily_cap` is used up. Resumes tomorrow, or raise it in Settings — Gmail itself stops around 500 recipients/day. |
+| `E-VALIDATION` | Attachments exceed the size cap, or an edited email address is malformed or already on another row. |
 | `E-NOTFOUND` | The applicant/template/config key named in the request doesn't exist. |
 | `E-UNKNOWN` | An unclassified failure. Check the Render logs for the stack trace. Seeing it repeatedly means a failure mode worth its own typed code. |
 
@@ -561,10 +586,11 @@ In order:
 2. **Settings → is Sending on?** It ships off.
 3. **Settings → is dry run off?** Dry run logs without delivering, by design.
 4. **Red banner saying "Sending is broken"?** Dry run is off but the mailer
-   isn't configured. Set `RESEND_API_KEY` and `MAIL_FROM`. Nothing has been
+   isn't configured. Set `MAIL_USER` and `MAIL_PASSWORD`. Nothing has been
    falsely recorded as sent.
-5. **`E-MAIL-DOMAIN`?** Your domain isn't verified on Resend, so it will only
-   deliver to your own account address.
+5. **`E-MAIL-AUTH`?** Almost always the App Password: either 2-Step
+   Verification is off, you used the account password, or the 16 characters
+   were pasted with Google's display spaces still in them.
 6. **Rows stuck at `APPROVED` with errors in the Email Log?** Read the
    `error_message` column — that's the reason, per recipient.
 
@@ -620,12 +646,13 @@ Google key: create a new service-account key, update the env var, redeploy,
 |---|---|
 | Google Sheets | free |
 | Groq | free tier; only `{{ai_body}}` templates and **Write with AI** spend tokens |
-| Resend | free: 100 emails/day, 3,000/month |
+| Gmail SMTP | free: ~500 recipients/day, rolling 24h |
 | Render | free (sleeps when idle) |
 | **Total** | **₹0/month** at this volume |
 
-The binding constraint is Resend's 100 emails/day. `send_daily_cap` defaults to
-match it.
+The binding constraint is Gmail's ~500 recipients a day. `send_daily_cap`
+defaults to 400, leaving headroom for the mail you send by hand from the same
+account.
 
 ---
 

@@ -78,7 +78,7 @@ export default async function HomePage() {
             <strong>Sending is broken.</strong>{' '}
             <span className="hint">
               Dry run is off, but email sending is not configured — every send is refused, and nothing is recorded as sent.
-              Set <code>RESEND_API_KEY</code> and <code>MAIL_FROM</code>, or turn dry run back on in Settings.
+              Set <code>MAIL_USER</code> and <code>MAIL_PASSWORD</code>, or turn dry run back on in Settings.
             </span>
           </div>
         </div>

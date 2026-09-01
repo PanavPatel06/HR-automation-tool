@@ -114,7 +114,7 @@ function buildDemoStore(): Record<TabName, Row[]> {
     EmailLog: (() => { n = 0; return rows('EmailLog', [
       { at: ago(2 * DAY), applicant_id: 'APP-1004', to: 'karan.mehta@example.com', subject: 'Your application for Backend Engineer at 3Space', result: 'sent', provider_message_id: 'demo-msg-1004', dry_run: 'false' },
       { at: ago(3 * DAY), applicant_id: 'APP-1005', to: 'neha.verma@example.com', subject: 'Your application for Frontend Engineer at 3Space', result: 'sent', provider_message_id: 'demo-msg-1005', dry_run: 'false' },
-      { at: ago(7 * DAY), applicant_id: 'APP-1007', to: 'dev.patel@example.com', subject: 'Your application for Product Designer at 3Space', result: 'failed', error_code: 'E-MAIL-DOMAIN', error_message: 'The domain is not verified on this Resend account', dry_run: 'false' },
+      { at: ago(7 * DAY), applicant_id: 'APP-1007', to: 'dev.patel@example.com', subject: 'Your application for Product Designer at 3Space', result: 'failed', error_code: 'E-MAIL-REJECTED', error_message: 'The recipient address was rejected by the receiving server', dry_run: 'false' },
     ]); })(),
 
     Config: (() => { n = 0; return rows('Config', CONFIG_DEFAULTS.map((c) => ({ ...c, updated_at: ago(30 * DAY) }))); })(),

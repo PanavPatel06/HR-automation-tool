@@ -13,7 +13,7 @@ app/api/login|logout/     shared-password session
 lib/contract.ts           hand-mirror of ../lib/schema.js (parity-tested)
 lib/duplicates.ts         repeated applicant_id / email detection
 lib/sheets.ts             all Sheets I/O + the demo dataset
-lib/mailer.ts             all outbound email (Resend, over plain fetch)
+lib/mailer.ts             all outbound email (SMTP via nodemailer, pooled)
 lib/template.ts           merge fields, HTML validation, template choice, the branded shell
 lib/draft.ts              batch selection, draft prompt, model-output gate
 lib/groq.ts               the only model provider
@@ -51,6 +51,7 @@ All in `app/api/action/route.ts`:
 | `a.sent_at` | Duplicate-send guard. |
 | `validateHtml()` | Rejects malformed or dangerous markup before it can be sent. |
 | `set-email` collision check | Refuses to put one address on two rows, rather than only reporting it later. |
+| `verifyMailer()` in preflight | Opens a real SMTP connection and authenticates, so a green tick means the credentials work — not just that they are set. |
 
 EmailLog is appended **before** the Applicants patch, deliberately: if the sheet
 write fails after a real send, the error says *"the email has already gone out —
@@ -75,7 +76,8 @@ See `.env.example`. Summary:
 | `DASHBOARD_PASSWORD`, `SESSION_SECRET` | Signing in. Always required. |
 | `SHEET_ID`, `GOOGLE_SERVICE_ACCOUNT_JSON` | Real data. Omit both for demo mode. |
 | `GROQ_API_KEY` | Any AI action. |
-| `RESEND_API_KEY`, `MAIL_FROM` | Real sending. Omit both to keep sends logged-only. |
+| `MAIL_USER`, `MAIL_PASSWORD` | Real sending. Omit either to keep sends logged-only. For Gmail: the address plus a 16-character App Password. |
+| `MAIL_FROM`, `MAIL_HOST`, `MAIL_PORT` | Optional. Display name and server; default `smtp.gmail.com:465`. |
 | `COMPANY_LOGO_BASE_URL` | Only if the email logo isn't served from this deployment. |
 
 ## Adding a column

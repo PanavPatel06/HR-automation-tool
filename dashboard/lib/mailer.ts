@@ -1,19 +1,31 @@
 import 'server-only';
+import nodemailer, { type Transporter } from 'nodemailer';
 
 /**
- * Outbound email, via Resend's HTTP API.
+ * Outbound email, over plain SMTP.
  *
- * Replaces the old Gmail API integration. Gmail needed a Google Cloud
- * project, an OAuth consent screen and a refresh token that silently expires
- * after 7 days while the app is unverified; Resend needs an API key and a
- * verified sending domain. Nothing here reads a mailbox — candidates' replies
- * land in whatever inbox `reply_to` points at, and a human reads them there.
+ * Two integrations came before this one and both were rejected for the same
+ * reason — setup cost out of all proportion to "send an email":
  *
- * One HTTPS POST, so no SDK: `fetch` is already in the runtime.
+ *   - The Gmail API needed a Google Cloud project, an OAuth consent screen and
+ *     a refresh token that silently expires after seven days while the app is
+ *     unverified.
+ *   - Resend needed a domain you control DNS for, because it will only deliver
+ *     to the account owner's own address until a domain is verified.
+ *
+ * SMTP with a Gmail App Password needs neither. Turn on 2-Step Verification,
+ * generate a 16-character password, and that is the entire setup. The password
+ * does not expire, there is no consent screen, and mail goes out from a real
+ * mailbox — so replies land there naturally and every send also appears in that
+ * account's Sent folder, which is a free second audit trail.
+ *
+ * Nothing here is Gmail-specific: MAIL_HOST/MAIL_PORT default to Gmail but
+ * point anywhere, so moving to a company mail server or a paid relay later is
+ * an environment change rather than a code change.
  *
  * Every caller in app/api/action/route.ts checks the `dry_run` Config flag
- * itself before this file builds a request — sendMail() has no dry-run mode of
- * its own, it always sends for real.
+ * before this file builds anything — sendMail() has no dry-run mode of its own,
+ * it always sends for real.
  */
 
 export class MailerError extends Error {
@@ -26,23 +38,37 @@ export class MailerError extends Error {
   }
 }
 
+const DEFAULT_HOST = 'smtp.gmail.com';
+const DEFAULT_PORT = 465;
+
 /**
- * Both halves are required. A key with no From address cannot send, and a From
- * address with no key cannot either — treating "half configured" as configured
- * is how a deployment ends up logging sends that never happened.
+ * The account that authenticates to the SMTP server. Both halves are required:
+ * a user with no password cannot log in and a password with no user cannot
+ * either, and treating "half configured" as configured is how a deployment
+ * ends up logging sends that never happened.
  */
 export function isMailerConfigured(): boolean {
-  return Boolean(process.env.RESEND_API_KEY && process.env.MAIL_FROM);
+  return Boolean(process.env.MAIL_USER && process.env.MAIL_PASSWORD);
 }
 
-/** The visible sender, e.g. `3Space Hiring <hiring@3space.in>`. */
+/**
+ * The visible sender. Gmail rewrites this to the authenticated account anyway
+ * unless the address is a verified alias, so it defaults to MAIL_USER — set
+ * MAIL_FROM only to add a display name, e.g.
+ * `3Space Hiring <3spacetechcorp@gmail.com>`.
+ */
 export function mailFrom(): string {
-  return String(process.env.MAIL_FROM ?? '').trim();
+  return String(process.env.MAIL_FROM ?? '').trim() || String(process.env.MAIL_USER ?? '').trim();
+}
+
+/** Where the SMTP connection goes, for preflight to show without sending anything. */
+export function mailHost(): string {
+  return `${process.env.MAIL_HOST || DEFAULT_HOST}:${process.env.MAIL_PORT || DEFAULT_PORT}`;
 }
 
 export type OutgoingAttachment = { filename: string; mimeType: string; base64: string };
 
-/** Total base64 attachment payload accepted per send — Resend's own ceiling is 40MB. */
+/** Total base64 attachment payload accepted per send. Gmail's own ceiling is 25MB. */
 export const MAX_ATTACHMENTS_BYTES = 15 * 1024 * 1024;
 
 /**
@@ -70,7 +96,7 @@ export async function fetchUrlAttachment(url: string, filename?: string): Promis
   return { filename: filename?.trim() || url.split('/').pop() || 'attachment', mimeType, base64: buf.toString('base64') };
 }
 
-/** Strip tags for the text/plain alternative. Spam filters mark HTML-only mail down. */
+/** Strip tags for the text/plain alternative. HTML-only mail scores worse with spam filters. */
 function toPlainText(html: string): string {
   return html
     .replace(/<br\s*\/?>/gi, '\n')
@@ -85,80 +111,118 @@ function toPlainText(html: string): string {
 }
 
 /**
- * Resend reports failures as a JSON body with `name` and `message`. The status
- * alone is ambiguous — a 403 is both "bad key" and "you haven't verified a
- * domain yet" — so the message is inspected to tell the two apart, because
- * they need completely different fixes.
+ * One transporter for the process, not one per send: it keeps a pooled
+ * connection, so a batch of fifty candidates is one TLS handshake rather than
+ * fifty. Built lazily so importing this file never opens a socket.
  */
-function mapError(status: number, payload: { name?: string; message?: string } | null): MailerError {
-  const message = payload?.message || `Resend returned HTTP ${status}.`;
+let transporter: Transporter | null = null;
 
-  if (status === 401 || payload?.name === 'missing_api_key' || payload?.name === 'restricted_api_key') {
-    return new MailerError('E-MAIL-AUTH', `Resend rejected the API key: ${message}`, 'Check RESEND_API_KEY in the deployment environment. Generate a new key at resend.com/api-keys with "Sending access".');
+function transport(): Transporter {
+  if (transporter) return transporter;
+
+  const user = process.env.MAIL_USER;
+  const pass = process.env.MAIL_PASSWORD;
+  if (!user || !pass) {
+    throw new MailerError('E-CONFIG-MISSING', 'Email sending is not configured.', 'Set MAIL_USER and MAIL_PASSWORD in the deployment environment.');
   }
-  // The single most common first-send failure: on a fresh Resend account you
-  // may only email yourself until a domain is verified.
-  if (/domain|verif|testing emails|own email address/i.test(message)) {
-    return new MailerError('E-MAIL-DOMAIN', `Resend refused the sender address: ${message}`,
-      `Verify your domain at resend.com/domains (add the DNS records it gives you), then set MAIL_FROM to an address at that domain. Until a domain is verified, Resend only delivers to the address that owns the account.`);
-  }
-  if (status === 403) return new MailerError('E-MAIL-AUTH', `Resend refused the request: ${message}`, 'Check the API key has sending permission, and that MAIL_FROM is at a domain you have verified.');
-  if (status === 422) return new MailerError('E-VALIDATION', `Resend rejected the message: ${message}`, 'Usually a malformed recipient address or an oversized attachment.');
-  if (status === 429) return new MailerError('E-MAIL-429', `Resend rate limit hit: ${message}`, 'The free tier allows 100 emails/day and 2 requests/second. Wait and retry, or upgrade the plan.');
-  return new MailerError('E-UNKNOWN', `Resend request failed: ${message}`, 'Check the server logs and resend.com/emails for the delivery record.');
+
+  const port = Number(process.env.MAIL_PORT) || DEFAULT_PORT;
+  transporter = nodemailer.createTransport({
+    host: process.env.MAIL_HOST || DEFAULT_HOST,
+    port,
+    // 465 is implicit TLS; 587 starts plaintext and upgrades via STARTTLS.
+    // Getting this pair wrong is the classic "connection hangs forever".
+    secure: port === 465,
+    auth: { user, pass },
+    pool: true,
+    maxConnections: 1,
+    // Gmail counts recipients per rolling 24h; one message per recipient keeps
+    // the accounting simple and means one bad address never poisons a batch.
+    maxMessages: 100,
+  });
+  return transporter;
 }
 
 /**
- * Send one email. Returns Resend's message id, which is what gets written to
- * EmailLog so a send can be traced back to a delivery record in their console.
+ * SMTP reports failures as a numeric reply code plus a server message. The
+ * code alone is ambiguous — a 535 is both "wrong password" and "you used your
+ * Google account password instead of an App Password" — so the message is
+ * inspected to tell them apart, because they need different fixes.
+ */
+function mapError(err: unknown): MailerError {
+  const e = err as { responseCode?: number; code?: string; message?: string; response?: string };
+  const status = e?.responseCode;
+  const text = `${e?.response || e?.message || String(err)}`;
+
+  if (status === 535 || e?.code === 'EAUTH') {
+    return new MailerError('E-MAIL-AUTH', `The mail server rejected the login: ${text}`,
+      'Use a 16-character Google App Password, not your normal account password — and 2-Step Verification must be on for the account to have one. Check MAIL_USER and MAIL_PASSWORD.');
+  }
+  // Gmail's daily cap is a rolling 24-hour window, not a midnight reset.
+  if (status === 421 || status === 450 || status === 452 || /quota|rate limit|too many/i.test(text)) {
+    return new MailerError('E-MAIL-429', `The mail server is throttling us: ${text}`,
+      'Usually the daily sending quota. Gmail allows about 500 recipients a day on a personal account, counted over a rolling 24 hours — it will resume on its own.');
+  }
+  if (status === 550 || status === 551 || status === 553 || status === 554) {
+    return new MailerError('E-MAIL-REJECTED', `The recipient was rejected: ${text}`,
+      'Usually a mistyped or dead address. Fix it in the candidate\'s Email box and try again.');
+  }
+  if (e?.code === 'ECONNECTION' || e?.code === 'ETIMEDOUT' || e?.code === 'ESOCKET' || e?.code === 'EDNS') {
+    return new MailerError('E-MAIL-NETWORK', `Could not reach the mail server: ${text}`,
+      `Check MAIL_HOST and MAIL_PORT (${mailHost()}). Port 465 needs implicit TLS, 587 needs STARTTLS — a mismatch hangs rather than erroring cleanly. The email was not sent.`);
+  }
+  return new MailerError('E-UNKNOWN', `Sending failed: ${text}`, 'Check the server logs, and the Sent folder of the sending account before retrying so you do not send a duplicate.');
+}
+
+/**
+ * Send one email. Returns the server-assigned message id, which is written to
+ * EmailLog so a send can be traced back to the message in the Sent folder.
  *
- * `replyTo` is what makes the reply loop work without any mailbox access: the
- * candidate hits Reply and their answer goes to a real human inbox, not to
- * this app.
+ * `replyTo` is what keeps the reply loop honest when the sending account is
+ * not the mailbox a human watches.
  */
 export async function sendMail(args: {
   to: string; subject: string; html: string; replyTo?: string; attachments?: OutgoingAttachment[];
 }): Promise<{ id: string }> {
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = mailFrom();
-  if (!apiKey || !from) {
-    throw new MailerError('E-CONFIG-MISSING', 'Email sending is not configured.', 'Set RESEND_API_KEY and MAIL_FROM in the deployment environment.');
-  }
-
   const attachments = args.attachments ?? [];
   const totalSize = attachments.reduce((n, a) => n + a.base64.length, 0);
   if (totalSize > MAX_ATTACHMENTS_BYTES) {
     throw new MailerError('E-VALIDATION', 'Attachments are too large.', `Total attachment size must stay under ${Math.round(MAX_ATTACHMENTS_BYTES / 1024 / 1024)}MB.`);
   }
 
-  let res: Response;
   try {
-    res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from,
-        to: [args.to],
-        subject: args.subject,
-        html: args.html,
-        text: toPlainText(args.html),
-        ...(args.replyTo ? { reply_to: args.replyTo } : {}),
-        ...(attachments.length
-          ? { attachments: attachments.map((a) => ({ filename: a.filename, content: a.base64, content_type: a.mimeType })) }
-          : {}),
-      }),
+    const info = await transport().sendMail({
+      from: mailFrom(),
+      to: args.to,
+      subject: args.subject,
+      html: args.html,
+      text: toPlainText(args.html),
+      ...(args.replyTo ? { replyTo: args.replyTo } : {}),
+      attachments: attachments.map((a) => ({
+        filename: a.filename,
+        content: a.base64,
+        encoding: 'base64',
+        contentType: a.mimeType || 'application/octet-stream',
+      })),
     });
+    return { id: info.messageId || '' };
   } catch (err) {
-    // A network failure here is genuinely ambiguous — the request may or may
-    // not have reached Resend. Say so rather than implying nothing was sent.
-    throw new MailerError('E-MAIL-NETWORK', `Could not reach Resend: ${(err as Error)?.message ?? String(err)}`,
-      'The email may or may not have been accepted. Check resend.com/emails before retrying, so you do not send a duplicate.');
+    if (err instanceof MailerError) throw err;
+    throw mapError(err);
   }
+}
 
-  const payload = await res.json().catch(() => null) as { id?: string; name?: string; message?: string } | null;
-  if (!res.ok) throw mapError(res.status, payload);
-  if (!payload?.id) {
-    throw new MailerError('E-UNKNOWN', 'Resend accepted the request but returned no message id.', 'Check resend.com/emails to confirm whether it was delivered before retrying.');
+/**
+ * Open a connection and authenticate, without sending anything. This is what
+ * lets preflight prove the credentials actually work rather than only that
+ * they are present — the difference between "a password is set" and "that
+ * password logs in".
+ */
+export async function verifyMailer(): Promise<void> {
+  try {
+    await transport().verify();
+  } catch (err) {
+    if (err instanceof MailerError) throw err;
+    throw mapError(err);
   }
-  return { id: payload.id };
 }
