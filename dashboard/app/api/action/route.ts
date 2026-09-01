@@ -25,6 +25,25 @@ function fail(status: number, code: string, message: string, hint = '') {
   return NextResponse.json({ ok: false, code, message, hint }, { status });
 }
 
+/**
+ * Dry run OFF means "these emails are meant to reach people". If Gmail is not
+ * configured, there is no way to honour that, and the only safe answer is to
+ * stop.
+ *
+ * The alternative — quietly logging the send as though it happened — is the
+ * worst failure this system could have: rows march to SENT, EmailLog says
+ * sent, and nobody finds out until a candidate is never heard from. One blank
+ * GMAIL_REFRESH_TOKEN in the deploy environment would do it.
+ *
+ * Returns a response when sending must be refused, otherwise null.
+ */
+function requireGmailWhenLive(dryRun: boolean) {
+  if (dryRun || isGmailConfigured()) return null;
+  return fail(503, 'E-CONFIG-MISSING',
+    'Dry run is off, but Gmail is not configured — nothing was sent.',
+    'Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET and GMAIL_REFRESH_TOKEN (run `npm run gmail:oauth`), or turn dry run back on in Settings. Nothing is logged as sent while this is broken.');
+}
+
 export async function POST(req: Request) {
   if (!(await requireSession())) return fail(401, 'E-AUTH', 'Your session has expired.', 'Sign in again.');
 
@@ -83,11 +102,9 @@ export async function POST(req: Request) {
     // through a stage machine. Replying to one candidate's thread from the
     // Inbox page is a different shape (one applicant, freeform content,
     // triggered by a human reading their reply). reply-template-fill is a
-    // pure read+render and works everywhere; reply-ai-draft's Sheets side
-    // works everywhere too (it never writes); send-reply's write side stays
-    // demo-mode only for now, with an honest 501 in real-Sheets mode rather
-    // than a fake path. Gmail is a separate, optional gate
-    // (isGmailConfigured()) — see gmail-sync and send-reply below.
+    // pure read+render and works everywhere; reply-ai-draft never writes;
+    // send-reply writes for real and answers to the same Sending switch,
+    // daily cap and Gmail requirement the bulk pipeline does.
     if (action === 'start-conversation') {
       const name = String(body.name ?? '').trim();
       const email = String(body.email ?? '').trim().toLowerCase();
@@ -273,7 +290,12 @@ export async function POST(req: Request) {
       // would make flipping GMAIL_REFRESH_TOKEN into .env.local the same as
       // consenting to send real mail, which is the wrong default.
       const dryRun = config.dry_run !== false;
-      const willSendForReal = isGmailConfigured() && !dryRun;
+      const willSendForReal = !dryRun;
+      // Live sending with no mailbox behind it is a broken deployment, not a
+      // quieter mode of working. Fail here rather than logging "sent" for an
+      // email nobody will ever receive. See requireGmailWhenLive().
+      const misconfigured = requireGmailWhenLive(dryRun);
+      if (misconfigured) return misconfigured;
 
       // An ad-hoc reply is still email leaving the building, so it answers to
       // the same two switches the bulk pipeline does — otherwise turning
@@ -322,7 +344,7 @@ export async function POST(req: Request) {
         applicant_id: applicantId,
         to: applicant.email,
         subject,
-        provider: willSendForReal ? 'gmail' : 'demo',
+        provider: willSendForReal ? 'gmail' : 'dry-run',
         result: 'sent',
         provider_message_id: providerMessageId,
         thread_id: threadId,
@@ -434,7 +456,11 @@ export async function POST(req: Request) {
       }
 
       const dryRun = config.dry_run !== false;
-      const willSendForReal = isGmailConfigured() && !dryRun;
+      const willSendForReal = !dryRun;
+      // Checked once for the whole batch, before a single row is touched: a
+      // missing mailbox is a deployment fault, not a per-candidate one.
+      const misconfigured = requireGmailWhenLive(dryRun);
+      if (misconfigured) return misconfigured;
       const cap = Number(config.send_daily_cap) || 400;
 
       const [applicants, emailLog, templates] = await Promise.all([readTab('Applicants'), readTab('EmailLog'), readTab('Templates')]);
@@ -501,7 +527,7 @@ export async function POST(req: Request) {
         budget--;
         okCount++;
         patches.push({ _row: a._row, email_status: 'sent', sent_at: now, thread_id: threadId, message_id: providerMessageId, stage: 'SENT', error_code: '', error_message: '', updated_at: now });
-        logSend(a, { provider: willSendForReal ? 'gmail' : 'demo', result: 'sent', provider_message_id: providerMessageId, thread_id: threadId, dry_run: willSendForReal ? 'false' : 'true' });
+        logSend(a, { provider: willSendForReal ? 'gmail' : 'dry-run', result: 'sent', provider_message_id: providerMessageId, thread_id: threadId, dry_run: willSendForReal ? 'false' : 'true' });
       }
 
       if (patches.length) await patchRows('Applicants', patches);
@@ -520,11 +546,17 @@ export async function POST(req: Request) {
       const checks: Array<{ check: string; ok: boolean; detail: string; fix: string }> = [];
       const warnOnly = new Set(['dry_run is ON', 'Gmail configured (optional)']);
       const add = (check: string, ok: boolean, detail = '', fix = '') => checks.push({ check, ok, detail, fix: ok ? '' : fix });
+      // Whether a missing Gmail is a warning or a failure depends on dry run,
+      // which is read further down. Recorded here, judged at the end.
+      let liveSending = false;
 
       add('GROQ_API_KEY is set', Boolean(process.env.GROQ_API_KEY), process.env.GROQ_API_KEY ? 'present' : 'missing', 'Add GROQ_API_KEY to the dashboard environment.');
 
       if (isDemoMode()) {
         add('Google Sheets configured', true, 'not set — running in demo mode with a built-in sample dataset', '');
+        // Still read the switches: a rehearsal in demo mode should surface the
+        // same "live but no mailbox" failure a real deployment would.
+        liveSending = parseConfig(await readTab('Config')).dry_run === false;
       } else {
         try {
           const rows = await readTab('Config');
@@ -533,6 +565,7 @@ export async function POST(req: Request) {
           const missingKeys = expectedKeys.filter((k) => !rows.some((r) => r.key === k));
           add('Config keys are present', missingKeys.length === 0, missingKeys.length ? `missing: ${missingKeys.join(', ')}` : 'ok', 'Run `npm run bootstrap:sheets` — it adds missing keys without touching existing values.');
           const config = parseConfig(rows);
+          liveSending = config.dry_run === false;
           add('dry_run is ON', config.dry_run === true, config.dry_run === true ? 'no real emails will be sent' : 'REAL EMAILS WILL BE SENT', 'This is only a warning. Turn it off in Settings when ready to send for real.');
         } catch (err) {
           const e = err as SheetsError;
@@ -540,7 +573,16 @@ export async function POST(req: Request) {
         }
       }
 
-      add('Gmail configured (optional)', isGmailConfigured(), isGmailConfigured() ? 'present' : 'not set — sends stay logged-only, never delivered', 'Run `npm run gmail:oauth` to enable real sending.');
+      // Optional only while dry run is on. Once sending is live it is the
+      // difference between mail going out and mail silently not going out,
+      // so it is promoted to a hard failure and named accordingly.
+      if (liveSending) {
+        add('Gmail configured (REQUIRED — dry run is off)', isGmailConfigured(),
+          isGmailConfigured() ? 'present' : 'MISSING — every send will be refused until this is fixed',
+          'Run `npm run gmail:oauth` and set the three GMAIL_* variables, or turn dry run back on in Settings.');
+      } else {
+        add('Gmail configured (optional)', isGmailConfigured(), isGmailConfigured() ? 'present' : 'not set — sends stay logged-only, never delivered', 'Run `npm run gmail:oauth` to enable real sending.');
+      }
 
       const failedChecks = checks.filter((c) => !c.ok);
       const fatal = failedChecks.filter((c) => !warnOnly.has(c.check));

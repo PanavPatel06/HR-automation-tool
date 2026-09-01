@@ -54,10 +54,24 @@ export default async function HomePage() {
             <span className="hint">Sends are logged to EmailLog but no email leaves the building. Turn it off in Settings when you are ready.</span>
           </div>
         </div>
-      ) : (
+      ) : isGmailConfigured() ? (
         <div className="banner warn">
           <span>!</span>
           <div><strong>Live sending is enabled.</strong> <span className="hint">Approved drafts and Inbox replies will reach real candidates.</span></div>
+        </div>
+      ) : (
+        // Dry run off with no mailbox behind it. Every send is refused rather
+        // than logged as though it happened, so this is a broken deployment
+        // and says so at the top of the page.
+        <div className="banner danger">
+          <span>⚠</span>
+          <div>
+            <strong>Sending is broken.</strong>{' '}
+            <span className="hint">
+              Dry run is off, but Gmail is not configured — every send is refused, and nothing is recorded as sent.
+              Set the three <code>GMAIL_*</code> variables (<code>npm run gmail:oauth</code>), or turn dry run back on in Settings.
+            </span>
+          </div>
         </div>
       )}
 

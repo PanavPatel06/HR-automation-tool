@@ -265,11 +265,15 @@ export function MailView({ applicants, templates, replies, roles, categories: co
   }
 
   const hasPlaceholder = PLACEHOLDER_RE.test(compose.subject) || PLACEHOLDER_RE.test(compose.html);
+  // Live sending with no mailbox configured is a broken deployment: the
+  // server refuses it outright (E-CONFIG-MISSING) rather than pretending, so
+  // the UI says so up front instead of letting someone click into the error.
+  const sendingBroken = !dryRun && !gmailConfigured;
+  const willSendForReal = !dryRun && gmailConfigured;
   // sendEnabled is the Settings master switch. A reply is email leaving the
   // building too, so it answers to the same switch the bulk Send does —
   // enforced server-side as well; this only saves the round trip.
-  const canSendReply = Boolean(compose.subject.trim() && compose.html.trim() && !hasPlaceholder && sendEnabled);
-  const willSendForReal = gmailConfigured && !dryRun;
+  const canSendReply = Boolean(compose.subject.trim() && compose.html.trim() && !hasPlaceholder && sendEnabled && !sendingBroken);
 
   return (
     <>
@@ -287,9 +291,9 @@ export function MailView({ applicants, templates, replies, roles, categories: co
         </button>
         <button
           className={dryRun ? '' : 'danger'}
-          disabled={!canSend || busy !== null || !sendEnabled}
+          disabled={!canSend || busy !== null || !sendEnabled || sendingBroken}
           onClick={() => setConfirmSend(true)}
-          title={!sendEnabled ? 'Sending is switched off in Settings' : undefined}
+          title={sendingBroken ? 'Dry run is off but Gmail is not configured — sending is refused' : !sendEnabled ? 'Sending is switched off in Settings' : undefined}
         >
           {dryRun ? 'Dry-run send' : 'Send'}{checked.size ? ` (${checked.size})` : ''}
         </button>
@@ -522,7 +526,11 @@ export function MailView({ applicants, templates, replies, roles, categories: co
               <h2>Reply</h2>
               <p className="sub">
                 Load a template, write it yourself, or let AI draft it — review before sending either way.
-                {willSendForReal ? ' Gmail is configured and dry run is off: this will send for real.' : gmailConfigured ? ' Dry run is on — this will be logged, not delivered, until you turn it off in Settings.' : ' Gmail is not configured — this will be simulated, not delivered.'}
+                {sendingBroken
+                  ? ' Dry run is off but Gmail is not configured — sending is refused until that is fixed. Nothing is being logged as sent.'
+                  : willSendForReal ? ' Gmail is configured and dry run is off: this will send for real.'
+                  : gmailConfigured ? ' Dry run is on — this will be logged, not delivered, until you turn it off in Settings.'
+                  : ' Gmail is not configured and dry run is on — this will be simulated, not delivered.'}
               </p>
 
               <div className="grid cols-2" style={{ marginBottom: 12 }}>

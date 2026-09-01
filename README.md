@@ -779,6 +779,13 @@ column positions never move. See [PLAN.md](PLAN.md) §6.
 
 These are enforced in code, not just intended:
 
+- **A broken mailbox stops the line; it never fakes a send.** With dry run off
+  and Gmail unconfigured, every send is refused with `E-CONFIG-MISSING` —
+  no row moves to SENT, nothing is written to EmailLog, the dashboard shows a
+  red *Sending is broken* banner, and preflight fails. The one thing this
+  system must never do is report an email as sent that no candidate will ever
+  receive.
+
 - **Nothing sends without human approval.** `DRAFTED → SENT` is not a legal transition; approval is a separate, human-only step.
 - **Dry run ships ON**, and Sending ships OFF in Settings.
 - **Bulk send names every recipient** in the request — there is no one-click "email everyone".
@@ -864,6 +871,7 @@ out-of-order request, before anything is read or written:
 | `E-BADREQ` | Request is missing a required field (e.g. no applicants selected). |
 | `E-STAGE` | A bulk action (approve/unapprove) was attempted on rows not in a legal stage for it. |
 | `E-QUOTA` | The day's `send_daily_cap` is used up. Resumes tomorrow, or raise it in Settings — Gmail itself stops around 500/day. |
+| `E-CONFIG-MISSING` (on a send) | Dry run is off but Gmail is not configured. **Nothing was sent and nothing was logged as sent.** Fix the `GMAIL_*` variables, or turn dry run back on. |
 | `E-NOTFOUND` | The applicant/template/config key named in the request doesn't exist. |
 | `E-NOT-IMPLEMENTED` | An Inbox action that only works in demo mode was called against a real spreadsheet (ad-hoc reply sending — see [Known limitations](#known-limitations)). |
 
