@@ -60,7 +60,10 @@ function writeSites() {
 
 test('every literal column written by the action route exists in the contract', () => {
   const sites = writeSites();
-  assert.ok(sites.length >= 6, `expected to find the write sites, found ${sites.length}`);
+  // EmailLog's rows are built into an array and appended in a loop, so they
+  // are out of this test's reach — dashboard/app/api/action/route.ts types
+  // them off the contract instead, which the build enforces.
+  assert.ok(sites.length >= 4, `expected to find the write sites, found ${sites.length}`);
 
   for (const { fn, tab, keys } of sites) {
     assert.ok(TABS[tab], `${fn} writes to unknown tab "${tab}"`);
@@ -75,11 +78,11 @@ test('every literal column written by the action route exists in the contract', 
   }
 });
 
-test('the send paths write the columns they need on every tab they touch', () => {
-  // Guards the send paths specifically: they are the ones whose failure
-  // leaves an email delivered with nothing recorded.
+test('the send path writes the columns it needs on every tab it touches', () => {
+  // Guards the send path specifically: it is the one whose failure leaves an
+  // email delivered with nothing recorded.
   const needed = {
-    Applicants: ['template_id', 'email_subject', 'email_html', 'sent_at', 'stage', 'updated_at'],
+    Applicants: ['last_subject', 'last_sent_at', 'updated_at'],
     EmailLog: ['at', 'applicant_id', 'to', 'subject', 'result', 'provider_message_id', 'dry_run', 'error_code', 'error_message'],
   };
   for (const [tab, columns] of Object.entries(needed)) {

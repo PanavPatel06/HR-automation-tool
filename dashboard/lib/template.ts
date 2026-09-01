@@ -55,7 +55,7 @@ export type MergeContext = Record<string, string>;
  * `/brand/*` is outside the session gate in middleware.ts for exactly this.
  *
  * Deliberately never returns empty: an unresolved merge field fails the send
- * closed (renderEmail() below), and a missing logo is not a reason to stop an
+ * closed at send time, and a missing logo is not a reason to stop an
  * offer letter going out. Worst case it resolves to a URL that 404s and the
  * `alt` text shows instead. Render and Vercel both publish the deployment's
  * own origin, so this is usually right with nothing configured at all.
@@ -97,7 +97,8 @@ export function buildMergeContext(applicant: Record<string, string>, config: Rec
 /**
  * Render a template. `allowHtmlFields` names context keys whose value is
  * trusted HTML (the signature); everything else is escaped. An unresolved
- * field is left visible in the output (e.g. a literal `{{ai_body}}`) rather
+ * field is left visible in the output (e.g. a literal `{{job_role}}` for a
+ * candidate whose role cell is empty) rather
  * than silently dropped, so a human reviewing the draft sees exactly what
  * still needs filling in.
  */
@@ -204,7 +205,7 @@ const TEMPLATE_SKELETON = [
 /** The default seed template's message — plugged into TEMPLATE_SKELETON's %%BODY%% slot. */
 export const DEFAULT_TEMPLATE_BODY = [
   '<p style="margin:0 0 18px;">Hi {{first_name}},</p>',
-  '{{ai_body}}',
+  '<p style="margin:0 0 16px;">Thanks for applying for the {{job_role}} role at {{company_name}}. We have your application and will be in touch shortly with next steps.</p>',
   '<p style="margin:26px 0 0;">{{hr_signature}}</p>',
 ].join('\n');
 
@@ -262,35 +263,3 @@ export function selectTemplate(
   return { template: best.template, warning: usedDefault ? 'W-TEMPLATE-DEFAULT' : null };
 }
 
-/**
- * Full render + gate for one applicant's email. Throws TemplateError when
- * anything would produce a broken email, so callers cannot accidentally send
- * or save it. `extras` carries generated values that are not applicant
- * columns — chiefly `ai_body` — trusted as HTML since they already passed
- * checkDraftSchema() in lib/draft.ts; validateHtml() below is the backstop.
- */
-export function renderEmail({
-  template, applicant, config, extras = {},
-}: {
-  template: TemplateRow; applicant: Record<string, string>; config: Record<string, unknown>; extras?: Record<string, string>;
-}): { subject: string; html: string; template_id: string } {
-  const ctx = { ...buildMergeContext(applicant, config), ...extras };
-  const allowHtmlFields = ['hr_signature', 'company_phone', 'company_incubator', ...Object.keys(extras)];
-  const subject = render(template.subject || '', ctx, { escape: false });
-  const body = render(template.html || '', ctx, { escape: true, allowHtmlFields });
-
-  const unresolved = [...new Set([...subject.unresolved, ...body.unresolved])];
-  if (unresolved.length) {
-    throw new TemplateError('E-MAIL-TEMPLATE', `Unresolved merge field(s): ${unresolved.map((f) => `{{${f}}}`).join(', ')}.`, 'Fill these in the template before drafting.');
-  }
-
-  const structure = validateHtml(body.html);
-  if (!structure.ok) {
-    throw new TemplateError('E-MAIL-TEMPLATE', `Template HTML is invalid: ${structure.problems.join(' ')}`, 'Fix the template HTML.');
-  }
-  if (!subject.html.trim()) {
-    throw new TemplateError('E-MAIL-TEMPLATE', 'Rendered subject is empty.', 'Set a subject on the template.');
-  }
-
-  return { subject: subject.html.trim(), html: body.html, template_id: template.template_id };
-}

@@ -1,12 +1,3 @@
-const STAGE_TONE: Record<string, string> = {
-  NEW: '', DRAFTED: 'info', APPROVED: 'warn', SENT: 'ok',
-  REPLIED: 'ok', CLOSED: '', FAILED: 'danger',
-};
-
-export function StagePill({ stage }: { stage: string }) {
-  return <span className={`pill ${STAGE_TONE[stage] ?? ''}`}>{stage || 'NEW'}</span>;
-}
-
 // Categories are open-ended (Config's `categories` key — Intern/Junior/Mid/
 // Senior/Lead by default, but a real deployment can rename these), so there's
 // no fixed name->tone map like STAGE_TONE. A hash picks a consistent tone per

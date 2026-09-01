@@ -3,7 +3,7 @@
 The whole application. Next.js App Router, deployed from this directory alone.
 
 ```
-app/page.tsx              the app — candidate list + per-candidate composer
+app/page.tsx              the app — candidate list + composer
 app/templates/            template library, AI template generation
 app/console/              preflight checks + the send log
 app/settings/             the Config toggles
@@ -14,14 +14,24 @@ lib/contract.ts           hand-mirror of ../lib/schema.js (parity-tested)
 lib/sheets.ts             all Sheets I/O + the demo dataset
 lib/mailer.ts             all outbound email (Resend, over plain fetch)
 lib/template.ts           merge fields, HTML validation, template choice, the branded shell
-lib/draft.ts              batch selection, draft prompt, model-output gate
 lib/groq.ts               the only model provider
 lib/auth.ts               session cookie
 ```
 
-Everything user-facing lives at `/`. `components/MailView.tsx` is the single
-biggest file and holds the candidate list, the bulk pipeline actions, and the
-composer.
+Everything user-facing lives at `/`. `components/MailView.tsx` holds the
+candidate list and the composer.
+
+There are only three actions that matter, all in `app/api/action/route.ts`:
+
+| Action | Writes? | What it does |
+|---|---|---|
+| `compose-template` | no | Fills a template with one candidate's row |
+| `compose-ai` | no | Writes a message from a brief plus that row (name, role, category, notes) |
+| `send` | yes | Delivers it, to one person or several, then logs it |
+
+Neither compose action writes anything — they hand a draft back to the browser.
+That is why there is no approval step: nothing can be sent that a person is not
+looking at.
 
 ## Demo mode
 
@@ -45,19 +55,24 @@ All in `app/api/action/route.ts`:
 | `requireMailerWhenLive()` | Dry run off + no mailer → `503 E-CONFIG-MISSING`, **before** any row or log write. Never fakes a send. |
 | `config.toggle_send === false` | The Settings master switch, enforced server-side, not just in the UI. |
 | `send_daily_cap` vs EmailLog | Counted from the log, so it survives restarts. |
-| `ACTIONABLE` + the stage machine | `DRAFTED → SENT` is refused with `E-STAGE`. |
-| `FIELD_RE` leftover check | An unresolved `{{field}}` fails with `E-MAIL-TEMPLATE`. |
-| `a.sent_at` | Duplicate-send guard. |
+| `single && !template` | Sending to several people requires a template — a one-off message cannot be blasted to a list. |
+| `FIELD_RE` leftover check | An unresolved `{{field}}` fails that recipient with a per-person error, after the merge. |
 | `validateHtml()` | Rejects malformed or dangerous markup before it can be sent. |
+| `EMAIL_RE` | A bad address is rejected without aborting the rest of the batch. |
 
 EmailLog is appended **before** the Applicants patch, deliberately: if the sheet
-write fails after a real send, the error says *"the email has already gone out —
-do not send it again"* and the audit row still exists.
+write fails after a real send, the error says *"they have already gone out"* and
+the audit row still exists.
+
+`EmailLogRow` in the route is typed off the contract, because those rows are
+built into an array and appended in a loop — out of reach of
+`tests/write-columns.test.js`, which can only read literal `appendRow` sites. The
+type gets the same guarantee at build time.
 
 ## Client/server boundary
 
-`lib/sheets.ts`, `lib/mailer.ts`, `lib/groq.ts`, `lib/draft.ts` and
-`lib/template.ts` are marked `server-only`. Client components must import types
+`lib/sheets.ts`, `lib/mailer.ts`, `lib/groq.ts` and `lib/template.ts` are
+marked `server-only`. Client components must import types
 from them only as `import type`, which is erased at compile time. `MailView.tsx`
 is a client component; every page under `app/` is a server component that reads
 Sheets and passes plain data down.
@@ -95,3 +110,4 @@ column takes down the whole tab, not just the new feature.
   OAuth provider would slot in.
 - Every page reads whole tabs; no pagination.
 - No reply ingestion — candidates reply to `company_email` and a human reads it.
+- A one-off (non-template) message goes to one recipient at a time, on purpose.

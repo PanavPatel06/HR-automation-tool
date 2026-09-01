@@ -48,9 +48,10 @@ for reading replies in Gmail instead of in this app.
 
 | | |
 |---|---|
-| **Write to one candidate** | Open them, type what the email should cover, click **Write with AI**. Their name, role and category come from the sheet — you never retype them. |
-| **Bulk drafting** | Select several, click **Generate drafts**: picks the most specific matching template, then asks Groq to personalise it — but only for templates that opt in with `{{ai_body}}`. |
-| **Review** | Every message is previewed and sent by a human. The model only ever fills the compose box. |
+| **Write to one candidate** | Open them, type what the email should cover, click **Write with AI**. Their name, role, category and notes come from the sheet — you never retype them. |
+| **Send to several** | Tick a few people, pick a template, send. The template is merged separately for each of them. |
+| **Templates** | Write them yourself or have the model generate one. They render the same way every time and cost no model quota. |
+| **Review** | Every message is read by a human before it goes. The model only ever fills the compose box. |
 | **Sending** | Via Resend, per-recipient isolated, with a daily cap and a dry-run mode that is **on by default**. |
 | **Branding** | Every email — template or AI-written — is wrapped in the same letterhead shell automatically. |
 | **Observability** | Every failure has a typed code, a plain-English message and a fix. The Console page is the whole debugging surface. |
@@ -103,14 +104,16 @@ scroll:
 | C | `email` | **yes** | `asha@example.com` | Where the email goes. |
 | D | `job_role` | **yes** | `Frontend Engineer` | Free text. The role dropdown is built from whatever values appear in this column, so keep the spelling consistent. |
 | E | `category` | optional | `Junior` | Seniority, or any bucket you like. Drives template matching. |
-| F | `stage` | **yes** | `NEW` | Where the row is in the pipeline. |
+| F | `notes` | optional | `Referred by Meera, strong React portfolio` | Free text handed to the model as context. **The cheapest way to make a generated email specific** — a sentence here changes the whole message. |
 
-Everything from column G onward is written by the app — `template_id`,
-`email_subject`, `email_html`, `sent_at`, `error_code`, `error_message`,
+Columns G–J are written by the app: `last_subject`, `last_sent_at`,
 `created_at`, `updated_at`. **Don't type into those; you will be overwritten.**
 
-The minimum viable row is `applicant_id`, `email`, `stage = NEW`. Name and role
-are what make the emails good, so fill them in.
+The minimum viable row is `applicant_id` and `email`. Name and role are what
+make the emails good, and `notes` is what makes them specific — fill all four in.
+
+There is no `stage` column and no pipeline. A row is just the facts about a
+person plus a note of when you last wrote to them.
 
 ### Templates
 
@@ -136,7 +139,7 @@ types stay right. The ones that matter:
 |---|---|---|
 | `dry_run` | `true` | **The safety catch.** True = sends are logged, not delivered. |
 | `toggle_send` | `false` | Master switch for sending. |
-| `toggle_draft` | `true` | Master switch for AI drafting. |
+| `toggle_ai` | `true` | Master switch for AI writing. Off means templates only, and no model quota is spent. |
 | `send_daily_cap` | `100` | Matches Resend's free-tier daily limit. |
 | `company_email` | — | **Where candidates' replies go.** Set this to a mailbox you actually read. |
 | `company_name`, `hr_name`, `hr_signature` | — | Merge fields. |
@@ -163,14 +166,14 @@ None of this is required — it's what stops a shared sheet rotting:
 - **Freeze row 1** (View → Freeze → 1 row) on every tab.
 - **Protect the header row** (right-click → Protect range) so nobody renames a
   column and takes the dashboard down with it. Highest-value item on this list.
-- **Data validation** on `stage` (`NEW, DRAFTED, APPROVED, SENT, REPLIED,
-  CLOSED, FAILED`) and `category`. Typos here are invisible until a draft
-  silently doesn't happen.
-- **Conditional formatting** on `stage`, so the pipeline reads at a glance.
+- **Data validation** on `category` and `job_role`, from a list. A typo in
+  `job_role` silently splits one role into two in the filter dropdown.
+- **Conditional formatting** on `last_sent_at` so you can see at a glance who
+  has not been contacted.
 - **Filter views** rather than filters — a filter view is per-person, so two
   people looking at once don't fight over the sort order.
-- **Archive** `SENT` / `CLOSED` rows to another sheet once a quarter. Every page
-  reads the whole tab, so a few thousand rows is where it starts feeling slow.
+- **Archive** old rows to another sheet once a quarter. Every page reads the
+  whole tab, so a few thousand rows is where it starts feeling slow.
 - **Version history** is your backup (File → Version history). Keep the
   service-account JSON somewhere safe and separate.
 
@@ -280,8 +283,8 @@ Then go live:
 | Task | Where |
 |---|---|
 | Add candidates | The Applicants tab, or **+ New** in the dashboard |
-| Write to one person | Open them, type the brief, **Write with AI** |
-| Bulk outreach | Select several → **Generate drafts** → **Approve** → **Send** |
+| Write to one person | Open them, type the brief, **Write with AI**, read it, **Send** |
+| Write to several | Tick them → pick a template → **Send** |
 | Change email wording | **Templates** page |
 | Something is wrong | **Console** page → **Run preflight** |
 | Turn Drafting/Sending off | **Settings** page. Takes effect on the next click, no redeploy. |
@@ -292,37 +295,46 @@ This is the main flow. Pick someone, then:
 
 - **What should this email say?** — a plain-English brief. *"Invite her to a
   30-minute intro call next week, mention it's remote, ask for two time slots."*
-  You never type her name or role; those come from the sheet.
-- **Base it on a template** (optional) — used as a style reference, not copied.
+  You never type her name or role; those come from the sheet, along with
+  whatever you wrote in her `notes` cell.
+- **Template** (optional) — used as a style reference, not copied.
 - **Write with AI** fills the subject and body, wrapped in the branded shell.
 - Edit anything you like, preview, then **Send**.
 
 **Use template as-is** skips the model entirely and just fills the merge fields
 — free, instant, deterministic.
 
-### Templates and the AI opt-in
+### Writing to several at once
+
+Tick the people you want, pick a template, and send. The template is rendered
+separately for each recipient, so everyone gets their own name and role.
+
+A hand-written or AI-written message goes to **one person at a time**, on
+purpose: nobody can have read twenty different generated emails, and the review
+step is the only thing standing between the model and a candidate's inbox.
+
+### Templates
 
 A template is plain HTML with `{{merge_fields}}`:
 
 ```html
 <p>Hi {{first_name}},</p>
-{{ai_body}}
+<p>Thanks for applying for the {{job_role}} role at {{company_name}}.</p>
 <p>{{hr_signature}}</p>
 ```
 
-`{{ai_body}}` is the switch. **With it**, Groq writes 2–4 personalised
-paragraphs per candidate when you click **Generate drafts**. **Without it**, the
-template renders deterministically and costs zero tokens. Since the free-tier
-token budget is the real constraint, this is how you decide where
-personalisation is worth spending it.
+It renders the same way every time, costs no model quota, and is what a send to
+several people uses. The model writes *new* templates for you on the Templates
+page — it never rewrites a stored one at send time, so what you read in the
+preview is exactly what goes out.
 
 Available fields: `first_name` `name` `email` `job_role` `category`
-`applicant_id` `company_name` `hr_name` `hr_signature` `ai_body`
-`company_email` `company_phone` `company_incubator` `company_logo_url`.
+`applicant_id` `company_name` `hr_name` `hr_signature` `company_email`
+`company_phone` `company_incubator` `company_logo_url`.
 
 An email with an unresolved `{{field}}` is **never sent** — it fails as
-`E-MAIL-TEMPLATE` first. `Hi {{first_name}},` reaching a candidate is worse than
-a visible error.
+`E-MAIL-TEMPLATE` first, per recipient. `Hi {{first_name}},` reaching a
+candidate is worse than a visible error.
 
 ### Template matching
 
@@ -376,31 +388,29 @@ without it.
 
 | File | Responsibility |
 |---|---|
-| [lib/schema.js](lib/schema.js) | **Single source of truth** for tabs, columns, the stage machine, Config defaults |
+| [lib/schema.js](lib/schema.js) | **Single source of truth** for tabs, columns and Config defaults |
 | [dashboard/lib/contract.ts](dashboard/lib/contract.ts) | Hand-mirror of the above (the dashboard deploys from `dashboard/` alone and can't import outside it). `tests/contract-parity.test.js` fails the build if they drift |
 | [dashboard/lib/sheets.ts](dashboard/lib/sheets.ts) | All Sheets I/O, plus the demo dataset |
 | [dashboard/lib/mailer.ts](dashboard/lib/mailer.ts) | All outbound email (Resend, over plain `fetch` — no SDK) |
 | [dashboard/lib/template.ts](dashboard/lib/template.ts) | Merge-field rendering, HTML validation, template selection, the branded skeleton |
-| [dashboard/lib/draft.ts](dashboard/lib/draft.ts) | Batch selection, the draft prompt, the schema gate on model output |
 | [dashboard/lib/groq.ts](dashboard/lib/groq.ts) | The only model provider |
-| [dashboard/app/api/action/route.ts](dashboard/app/api/action/route.ts) | Every mutating action, and every safety gate |
+| [dashboard/app/api/action/route.ts](dashboard/app/api/action/route.ts) | Every action, and every safety gate. `compose-template`, `compose-ai` and `send` are the only three that matter |
 
 **Google Sheets is the source of truth.** Not a cache, not a mirror. If the
 dashboard is down, HR can still see every candidate and work by hand in the
 sheet directly. That property is worth more than the performance a real database
 would buy at this scale.
 
-### The stage machine
+### No pipeline
 
-```
-NEW ──▶ DRAFTED ──▶ APPROVED ──▶ SENT ──▶ REPLIED ──▶ CLOSED
- │         │            │          │
- └─────────┴────────────┴──────────┴──▶ FAILED ──▶ (back to origin)
-```
+There is no stage machine, no draft/approve/send cycle, and no per-row workflow
+state. The compose actions write nothing — they hand a draft back to the
+browser — and `send` is the only thing that touches a person. The review step is
+that you are looking at the message when you press the button.
 
-`DRAFTED → SENT` is illegal: approval is mandatory and enforced server-side, not
-just hidden in the UI. `REPLIED` is set by hand — you move a row there after
-reading the candidate's answer in your own inbox.
+That removed about a third of the code, and every bug class that came with it:
+rows stuck in the wrong stage, drafts approved and then edited, `SENT` set for
+an email that failed.
 
 ### Trust boundaries
 
@@ -429,8 +439,10 @@ reading the candidate's answer in your own inbox.
 These are enforced in code, not just intended. They are the invariants worth
 protecting when changing anything:
 
-1. **Nothing sends without a human click.** The model only fills the compose box.
-2. **`DRAFTED → SENT` is impossible.** Approval is enforced server-side.
+1. **Nothing sends without a human click**, on a message they are looking at.
+   The compose actions write nothing at all.
+2. **Several recipients means a template.** A one-off message cannot be blasted
+   to a list, because nobody could have read it for each of them.
 3. **Dry run ships ON and `toggle_send` ships OFF.** A fresh deployment cannot
    email anyone by accident.
 4. **A broken mailer stops the line; it never fakes a send.** Dry run off with no
@@ -441,13 +453,14 @@ protecting when changing anything:
 5. **EmailLog is written before the pipeline state.** A send that isn't in the
    log is a send somebody repeats.
 6. **One failed recipient never aborts a batch** — and never leaves that row
-   looking sent. It stays `APPROVED` and retryable, with `result: failed` logged.
-7. **An unresolved `{{field}}` blocks the send.**
-8. **Already-sent rows are refused.** `sent_at` is the duplicate guard.
-9. **Bulk send names every recipient** in the request — there is no one-click
+   looking written to. `last_sent_at` is left alone and `result: failed` is
+   logged with the reason.
+7. **An unresolved `{{field}}` blocks that recipient's send**, checked after
+   the merge, per person.
+8. **Send names every recipient** in the request — there is no one-click
    "email everyone".
-10. **The daily cap is counted from EmailLog, not an in-memory counter**, so it
-    survives restarts.
+9. **The daily cap is counted from EmailLog, not an in-memory counter**, so it
+   survives restarts.
 
 ---
 
@@ -510,7 +523,6 @@ and stops; the human who clicked decides whether to try again.
 |---|---|
 | `E-AUTH` | Session expired — sign in again. |
 | `E-BADREQ` | Missing a required field (no applicant selected, no brief and no template, ...). |
-| `E-STAGE` | A bulk action was attempted on rows not in a legal stage for it. |
 | `E-QUOTA` | The day's `send_daily_cap` is used up. Resumes tomorrow, or raise it in Settings — Resend's free tier itself stops at 100/day. |
 | `E-VALIDATION` | Attachments exceed the size cap, or Resend rejected the payload. |
 | `E-NOTFOUND` | The applicant/template/config key named in the request doesn't exist. |
@@ -538,18 +550,18 @@ In order:
    falsely recorded as sent.
 5. **`E-MAIL-DOMAIN`?** Your domain isn't verified on Resend, so it will only
    deliver to your own account address.
-6. **Rows stuck at `APPROVED` with errors in the Email Log?** Read the
-   `error_message` column — that's the reason, per recipient.
+6. **A partial result?** Some recipients went and some didn't. The
+   `error_message` column in the Email Log has the reason, per person.
 
 ### Applicants are not appearing
 
 A row needs an `applicant_id` and at least one non-empty cell. Check it isn't
-being hidden by the role/stage/category filter dropdowns.
+being hidden by the search box or the role filter.
 
-### Draft is not generating
+### "Write with AI" does nothing
 
-Check `GROQ_API_KEY` in preflight; check **Drafting** is on in Settings; check
-the row's stage is `NEW`, `DRAFTED` or `FAILED`.
+Check `GROQ_API_KEY` in preflight, and that **AI writing** is on in Settings.
+Templates keep working either way.
 
 ### "Write with AI" is greyed out
 
@@ -563,21 +575,20 @@ otherwise.
 `npm run bootstrap:sheets`. It is the fix for *every* schema error, and it is
 always safe to re-run.
 
-### Recovering a stuck row
+### Someone was emailed twice
 
-Edit the sheet directly. Set `stage` back to `NEW` and clear `email_subject`,
-`email_html`, `sent_at`, `error_code`, `error_message`. The dashboard picks it up
-on the next read.
+There is no automatic duplicate guard beyond the daily cap — `last_sent_at` on
+their row tells you when they were last written to, and the Email Log has every
+attempt. Clear `last_sent_at` if you want the list to show them as un-contacted.
 
 ### Changing the AI's behaviour
 
-The prompts are inline in
-[dashboard/app/api/action/route.ts](dashboard/app/api/action/route.ts) (the
-one-off composer and template generation) and
-[dashboard/lib/draft.ts](dashboard/lib/draft.ts) (bulk drafting). Change the
-wording, redeploy. The schema gate that validates the output is
-`checkDraftSchema()` — tighten that, not the prompt, if the model keeps emitting
-something it shouldn't.
+Both prompts are inline in
+[dashboard/app/api/action/route.ts](dashboard/app/api/action/route.ts) — one in
+`compose-ai`, one in `template-generate`. Change the wording, redeploy. What the
+model writes is always run back through the merge gate and `validateHtml()`, so
+tighten those rather than the prompt if it keeps emitting something it
+shouldn't.
 
 ### Rotating a secret
 
@@ -592,7 +603,7 @@ Google key: create a new service-account key, update the env var, redeploy,
 | | |
 |---|---|
 | Google Sheets | free |
-| Groq | free tier; only `{{ai_body}}` templates and **Write with AI** spend tokens |
+| Groq | free tier; only **Write with AI** and template generation spend tokens |
 | Resend | free: 100 emails/day, 3,000/month |
 | Render | free (sleeps when idle) |
 | **Total** | **₹0/month** at this volume |
@@ -623,7 +634,8 @@ The tests are the guardrail that matters: `contract-parity.test.js` and
   `company_email` points at. This is the deliberate trade described at the top.
 - **No automated intake.** Rows arrive because someone put them there.
 - **One shared password** rather than per-user sign-in.
-- **No reply classification.** The `REPLIED` stage is set by hand.
+- **A one-off message goes to one person at a time.** Several recipients means a
+  template, deliberately.
 - **Free-tier Render sleeps**, so the first request after idle is slow.
 - **Every page reads whole tabs.** A few thousand rows is where it slows down;
-  archive `SENT`/`CLOSED` rows periodically.
+  archive old rows periodically.

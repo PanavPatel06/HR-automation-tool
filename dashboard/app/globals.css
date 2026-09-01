@@ -382,6 +382,7 @@ textarea { width: 100%; font-family: var(--mono); font-size: 12px; }
 /* --- misc --- */
 .grid { display: grid; gap: 12px; }
 .grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.grid.cols-3 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 .grid.cols-4 { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
 .stat {
   background: var(--panel); border: 1px solid var(--border);
@@ -488,7 +489,7 @@ a.attachment-pill:hover { background: var(--panel-2); }
   .nav a { padding: 6px 10px; font-size: 12.5px; }
   h1 { font-size: 21px; }
   .panel, .stat { padding: 14px; }
-  .grid.cols-4 { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); }
+  .grid.cols-3, .grid.cols-4 { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); }
   th, td { padding: 8px 9px; }
   .login-wrap { margin: 8vh auto; padding: 24px 20px; max-width: calc(100vw - 32px); }
 }

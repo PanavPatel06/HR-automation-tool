@@ -1,16 +1,14 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validateHeaders, columnsFor, canTransition, CONFIG_DEFAULTS, TAB_NAMES } = require('../lib/schema');
-
-// --- sheet contract ---------------------------------------------------------
+const { validateHeaders, columnsFor, CONFIG_DEFAULTS, TAB_NAMES } = require('../lib/schema');
 
 test('the columns a human types come first on Applicants', () => {
   // The sheet is maintained by hand. If the app ever pushes name/email/role
   // past the first screen, adding a candidate becomes a scrolling exercise.
   assert.deepEqual(
     columnsFor('Applicants').slice(0, 6),
-    ['applicant_id', 'name', 'email', 'job_role', 'category', 'stage'],
+    ['applicant_id', 'name', 'email', 'job_role', 'category', 'notes'],
   );
 });
 
@@ -23,9 +21,9 @@ test('validateHeaders detects the drift that causes E-SHEET-SCHEMA', () => {
   assert.equal(r.ok, false);
   assert.deepEqual(r.missing, ['job_role']);
 
-  const extra = validateHeaders('Applicants', [...good, 'notes']);
+  const extra = validateHeaders('Applicants', [...good, 'linkedin']);
   assert.equal(extra.ok, true, 'extra columns are reported but not fatal');
-  assert.deepEqual(extra.extra, ['notes']);
+  assert.deepEqual(extra.extra, ['linkedin']);
 });
 
 test('every tab has a resolvable column list', () => {
@@ -42,21 +40,18 @@ test('every Config default has a key, value and type', () => {
 });
 
 test('sending ships off, and dry run ships on', () => {
-  // Both of these are what stop a fresh deployment emailing real candidates
-  // before anyone has looked at a draft.
+  // These two are what stop a fresh deployment emailing real candidates before
+  // anyone has looked at a message.
   const byKey = Object.fromEntries(CONFIG_DEFAULTS.map((d) => [d.key, d.value]));
   assert.equal(byKey.dry_run, 'true');
   assert.equal(byKey.toggle_send, 'false');
 });
 
-// --- stage machine -----------------------------------------------------------
-
-test('the stage machine refuses illegal jumps', () => {
-  assert.equal(canTransition('NEW', 'DRAFTED'), true);
-  assert.equal(canTransition('DRAFTED', 'APPROVED'), true);
-  assert.equal(canTransition('APPROVED', 'SENT'), true);
-  assert.equal(canTransition('NEW', 'SENT'), false, 'cannot send without drafting and approving');
-  assert.equal(canTransition('DRAFTED', 'SENT'), false, 'approval is mandatory');
-  assert.equal(canTransition('FAILED', 'DRAFTED'), true, 'retry rolls back to the origin stage');
-  assert.equal(canTransition(null, 'NEW'), true);
+test('EmailLog can record both halves of a send attempt', () => {
+  // It is the only audit trail — a row must be able to say what was sent, to
+  // whom, whether it was real, and why it failed if it did.
+  const cols = columnsFor('EmailLog');
+  for (const c of ['at', 'to', 'subject', 'result', 'dry_run', 'error_code', 'error_message']) {
+    assert.ok(cols.includes(c), `EmailLog is missing "${c}"`);
+  }
 });
