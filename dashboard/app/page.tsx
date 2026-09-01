@@ -3,6 +3,7 @@ import { isMailerConfigured } from '../lib/mailer';
 import { MailView } from '../components/MailView';
 import { ErrorBanner } from '../components/Pills';
 import { pluralise } from '../lib/format';
+import { findDuplicates } from '../lib/duplicates';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -16,7 +17,7 @@ export default async function HomePage() {
     return (
       <>
         <div className="eyebrow">Hiring pipeline</div>
-        <h1><span className="accent">Candidates</span></h1>
+        <h1><span className="accent">Inbox</span></h1>
         <ErrorBanner error={{ code: e.code, message: e.message, hint: e.hint }} />
       </>
     );
@@ -29,6 +30,10 @@ export default async function HomePage() {
   const roles = [...new Set(applicants.map((a) => a.job_role).filter(Boolean))].sort();
   const categories = Array.isArray(config.categories) ? config.categories as string[] : [];
 
+  // Read once here and once in MailView; both are cheap and this keeps the
+  // stat card honest without threading another prop through.
+  const duplicateCount = findDuplicates(applicants).length;
+
   const count = (fn: (r: (typeof applicants)[number]) => boolean) => applicants.filter(fn).length;
   const stats = [
     { label: 'Total', value: applicants.length, note: `${pluralise(roles.length, 'role')}` },
@@ -36,17 +41,18 @@ export default async function HomePage() {
     { label: 'Awaiting approval', value: count((r) => r.stage === 'DRAFTED'), note: 'needs a human' },
     { label: 'Ready to send', value: count((r) => r.stage === 'APPROVED'), note: config.dry_run ? 'dry run is ON' : 'live sending' },
     { label: 'Sent', value: count((r) => r.stage === 'SENT'), note: `${count((r) => r.stage === 'REPLIED')} marked replied` },
-    { label: 'Needs attention', value: count((r) => Boolean(r.error_code)), note: 'failed or blocked' },
+    { label: 'Needs attention', value: count((r) => Boolean(r.error_code)) + duplicateCount, note: duplicateCount ? `${pluralise(duplicateCount, 'duplicate')}` : 'failed or blocked' },
   ];
 
   return (
     <>
       <div className="eyebrow">Hiring pipeline</div>
-      <h1><span className="accent">Candidates</span></h1>
+      <h1><span className="accent">Inbox</span></h1>
       <p className="page-sub">
         Everyone in the Applicants tab, in one place. Work the pipeline in bulk, or open a
         candidate and write to them — say what the email should cover and the model drafts it,
-        using their name and role from the sheet.
+        using their name and role from the sheet. The sheet is read fresh on every load;
+        <strong> Refresh from sheet</strong> re-reads it without losing your place.
       </p>
 
       {config.dry_run ? (
@@ -96,6 +102,7 @@ export default async function HomePage() {
         mailerConfigured={isMailerConfigured()}
         dryRun={config.dry_run === true}
         sendEnabled={config.toggle_send === true}
+        loadedAt={new Date().toISOString()}
       />
     </>
   );

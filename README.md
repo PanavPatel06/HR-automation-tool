@@ -157,6 +157,25 @@ There is no automated intake. Three options, in increasing order of effort:
    short Apps Script `onFormSubmit` trigger that appends a properly shaped row
    to Applicants.
 
+### Duplicates
+
+The sheet is typed into and pasted into by hand, so the same person arriving
+twice is a matter of when, not if. The Inbox checks for two kinds on every
+load, and **Run preflight** reports both:
+
+| Repeated | Severity | Why |
+|---|---|---|
+| `applicant_id` | **blocks preflight** | Every action resolves a row with the *first* id that matches, so approving or emailing the second row silently acts on the first. You would see a success banner naming the right person while the wrong row moved. |
+| `email` | warning | That person receives every email twice. Annoying and visible, but recoverable. |
+
+Both appear as a banner above the list, with the **sheet row numbers** so you
+can go and fix them, and a `duplicate` pill on each affected candidate. Two
+people at the same company, or two people with the same name, are not treated
+as duplicates — only the two fields the code actually keys on.
+
+Editing an address in the app refuses to *create* a duplicate: `set-email`
+returns `409` if another row already has it.
+
 ### Making it pleasant to work in
 
 None of this is required — it's what stops a shared sheet rotting:
@@ -281,6 +300,8 @@ Then go live:
 | Task | Where |
 |---|---|
 | Add candidates | The Applicants tab, or **+ New** in the dashboard |
+| Fix a wrong email address | Open the candidate — the **Email** box in their header saves straight to the sheet |
+| Pick up sheet edits | **⟳ Refresh from sheet** in the toolbar |
 | Write to one person | Open them, type the brief, **Write with AI** |
 | Bulk outreach | Select several → **Generate drafts** → **Approve** → **Send** |
 | Change email wording | **Templates** page |
@@ -518,7 +539,7 @@ and stops; the human who clicked decides whether to try again.
 | `E-BADREQ` | Missing a required field (no applicant selected, no brief and no template, ...). |
 | `E-STAGE` | A bulk action was attempted on rows not in a legal stage for it. |
 | `E-QUOTA` | The day's `send_daily_cap` is used up. Resumes tomorrow, or raise it in Settings — Resend's free tier itself stops at 100/day. |
-| `E-VALIDATION` | Attachments exceed the size cap, or Resend rejected the payload. |
+| `E-VALIDATION` | Attachments exceed the size cap, Resend rejected the payload, or an edited email address is malformed or already on another row. |
 | `E-NOTFOUND` | The applicant/template/config key named in the request doesn't exist. |
 | `E-UNKNOWN` | An unclassified failure. Check the Render logs for the stack trace. Seeing it repeatedly means a failure mode worth its own typed code. |
 

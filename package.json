@@ -2,9 +2,9 @@
   "name": "hr-automation",
   "version": "1.0.0",
   "private": true,
-  "description": "HR hiring automation — Google Sheets + a Next.js dashboard, no separate backend.",
+  "description": "HR hiring automation \u2014 Google Sheets + a Next.js dashboard, no separate backend.",
   "scripts": {
-    "test": "node --test \"tests/**/*.test.js\"",
+    "test": "node --experimental-strip-types --test \"tests/**/*.test.js\"",
     "bootstrap:sheets": "node scripts/bootstrap-sheets.mjs",
     "check:sheets": "node scripts/bootstrap-sheets.mjs --check",
     "seed:demo": "node scripts/bootstrap-sheets.mjs --seed-demo",

@@ -7,6 +7,7 @@ import { buildMergeContext, render, validateHtml, selectTemplate, renderSkeleton
 import { selectForDrafting, usesAi, buildDraftPrompt, checkDraftSchema, assembleDraft } from '../../../lib/draft';
 import { sendMail, fetchUrlAttachment, isMailerConfigured, mailFrom, MailerError, MAX_ATTACHMENTS_BYTES, type OutgoingAttachment } from '../../../lib/mailer';
 import { ACTIONABLE } from '../../../lib/contract';
+import { findDuplicates, describeDuplicates } from '../../../lib/duplicates';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -23,6 +24,9 @@ type Body = { action: string; ids?: string[]; [k: string]: unknown };
 function fail(status: number, code: string, message: string, hint = '') {
   return NextResponse.json({ ok: false, code, message, hint }, { status });
 }
+
+/** Pragmatic check — catches typos and empty cells, not a full RFC 5322 parse. */
+const EMAIL_RE = /^[^\s@,;:<>()[\]\\]+@[^\s@.]+(\.[^\s@.]+)+$/;
 
 /**
  * Dry run OFF means "these emails are meant to reach people". If the mailer is
@@ -445,7 +449,7 @@ export async function POST(req: Request) {
         if (a.stage !== 'APPROVED') { reject(`Stage is "${a.stage || 'empty'}", not APPROVED. Approve the draft before sending.`); continue; }
         if (!a.email_subject || !a.email_html) { reject('Row is APPROVED but has no draft body. Regenerate the draft.'); continue; }
         if (/\{\{[^}]+\}\}/.test(a.email_subject + a.email_html)) { reject('Draft still contains unresolved merge fields. Nothing was sent.'); continue; }
-        if (!/^[^\s@,;:<>()[\]\\]+@[^\s@.]+(\.[^\s@.]+)+$/.test(a.email)) { reject(`"${a.email}" is not a deliverable address.`); continue; }
+        if (!EMAIL_RE.test(a.email)) { reject(`"${a.email}" is not a deliverable address.`); continue; }
         if (a.sent_at) { reject('Already sent. Refusing to send a duplicate.'); continue; }
         if (budget <= 0) { reject(`Daily send cap of ${cap} reached. Remaining sends resume tomorrow.`); continue; }
 
@@ -488,7 +492,7 @@ export async function POST(req: Request) {
     // --- Preflight: check every credential without writing or sending -------
     if (action === 'preflight') {
       const checks: Array<{ check: string; ok: boolean; detail: string; fix: string }> = [];
-      const warnOnly = new Set(['dry_run is ON', 'Email sending configured (optional)']);
+      const warnOnly = new Set(['dry_run is ON', 'Email sending configured (optional)', 'No repeated email address', 'Email addresses look valid']);
       const add = (check: string, ok: boolean, detail = '', fix = '') => checks.push({ check, ok, detail, fix: ok ? '' : fix });
       // Whether a missing mailer is a warning or a failure depends on dry run,
       // which is read further down. Recorded here, judged at the end.
@@ -528,6 +532,35 @@ export async function POST(req: Request) {
         add('Email sending configured (optional)', isMailerConfigured(),
           isMailerConfigured() ? `sending as ${mailFrom()}` : 'not set — sends stay logged-only, never delivered',
           'Set RESEND_API_KEY and MAIL_FROM to enable real sending.');
+      }
+
+      // Data checks, run in demo mode too: they are about the rows, not the
+      // credential, so a rehearsal should surface exactly what a real sheet
+      // would. A repeated applicant_id is a silent correctness bug — every
+      // lookup takes the first match — so it blocks; a repeated address or a
+      // malformed one only affects that person and is visible, so they warn.
+      try {
+        const applicants = await readTab('Applicants');
+        const withId = applicants.filter((a) => a.applicant_id);
+        const duplicates = findDuplicates(applicants);
+
+        const repeatedIds = duplicates.filter((d) => d.kind === 'applicant_id');
+        add('No repeated applicant_id', repeatedIds.length === 0,
+          repeatedIds.length ? describeDuplicates(repeatedIds) : `${withId.length} row(s) checked`,
+          'Two rows with one id means every action on it silently hits the first row. Give one of them a new id in the sheet.');
+
+        const repeatedEmails = duplicates.filter((d) => d.kind === 'email');
+        add('No repeated email address', repeatedEmails.length === 0,
+          repeatedEmails.length ? describeDuplicates(repeatedEmails) : 'none',
+          'That person receives every email twice. Delete the duplicate row, or correct the address on the candidate.');
+
+        const badEmails = withId.filter((a) => a.email && !EMAIL_RE.test(a.email));
+        add('Email addresses look valid', badEmails.length === 0,
+          badEmails.length ? `${badEmails.length} bad: ${badEmails.slice(0, 3).map((a) => `${a.applicant_id} (${a.email})`).join(', ')}` : 'all parse',
+          'Fix it on the candidate, or in the Applicants tab. These rows are refused at send time.');
+      } catch (err) {
+        const e = err as SheetsError;
+        add('Applicants tab is readable', false, `${e.code}: ${e.message}`, e.hint);
       }
 
       const failedChecks = checks.filter((c) => !c.ok);
@@ -576,6 +609,35 @@ export async function POST(req: Request) {
         await setConfig(key, value);
         revalidatePath('/', 'layout');
         return NextResponse.json({ ok: true, result: { status: 'ok', notes: `${key} = ${value}` } });
+      }
+
+      case 'set-email': {
+        // A row can arrive from a form or a paste with a typo'd or missing
+        // address — APP-1006 in the demo data is exactly that. Sending refuses
+        // those rows, so being able to correct one here is the difference
+        // between fixing it in two seconds and going hunting in the sheet.
+        const applicantId = String(body.applicant_id ?? '').trim();
+        const email = String(body.email ?? '').trim().toLowerCase();
+        if (!applicantId) return fail(400, 'E-BADREQ', 'No applicant selected.');
+        if (!email) return fail(400, 'E-BADREQ', 'An email address is required.');
+        if (!EMAIL_RE.test(email)) return fail(400, 'E-VALIDATION', `"${email}" is not a valid email address.`, 'It needs an @ and a domain with a dot, e.g. name@example.com.');
+
+        const rows = await readTab('Applicants');
+        const target = rows.find((r) => r.applicant_id === applicantId);
+        if (!target) return fail(404, 'E-NOTFOUND', `Applicant ${applicantId} does not exist.`);
+
+        // Refuse to *create* a duplicate here, rather than only reporting it
+        // later: two rows with one address means someone gets emailed twice.
+        const clash = rows.find((r) => r.applicant_id !== applicantId && r.email.trim().toLowerCase() === email);
+        if (clash) {
+          return fail(409, 'E-VALIDATION', `${email} is already on ${clash.applicant_id} (${clash.name || 'no name'}).`,
+            'Two rows sharing an address means that person gets every email twice. Use a different address, or delete the duplicate row in the sheet.');
+        }
+
+        const now = new Date().toISOString();
+        await patchRows('Applicants', [{ _row: target._row, email, updated_at: now }]);
+        revalidatePath('/', 'layout');
+        return NextResponse.json({ ok: true, result: { status: 'ok', notes: `${target.name || applicantId} is now ${email}.` } });
       }
 
       case 'set-category': {

@@ -1,9 +1,11 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Row } from '../lib/contract';
 import { isTruthy, ACTIONABLE, STAGES } from '../lib/contract';
 import { StagePill, CategoryPill } from './Pills';
 import { shortDate, timeAgo } from '../lib/format';
+import { findDuplicates, duplicateIds } from '../lib/duplicates';
 import { useAction, ResultBanner } from './useAction';
 
 const PLACEHOLDER_RE = /\{\{\s*[a-zA-Z0-9_.]+\s*\}\}/;
@@ -47,7 +49,7 @@ async function fileToBase64(file: File): Promise<string> {
  * Nothing here reads the candidate's mailbox. Their replies arrive in whatever
  * inbox company_email points at, and a human reads them there.
  */
-export function MailView({ applicants, templates, roles, categories: configCategories, mailerConfigured, dryRun, sendEnabled }: {
+export function MailView({ applicants, templates, roles, categories: configCategories, mailerConfigured, dryRun, sendEnabled, loadedAt }: {
   applicants: Row[];
   templates: Row[];
   roles: string[];
@@ -55,8 +57,12 @@ export function MailView({ applicants, templates, roles, categories: configCateg
   mailerConfigured: boolean;
   dryRun: boolean;
   sendEnabled: boolean;
+  /** When the server read the sheet for this render. */
+  loadedAt: string;
 }) {
   const { run, busy, result, clear } = useAction();
+  const router = useRouter();
+  const [refreshing, startRefresh] = useTransition();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
@@ -71,8 +77,15 @@ export function MailView({ applicants, templates, roles, categories: configCateg
   const [bulkCategory, setBulkCategory] = useState('');
   const [showNewContact, setShowNewContact] = useState(false);
   const [newContact, setNewContact] = useState({ name: '', email: '', role: '', category: '', notes: '' });
+  const [emailDraft, setEmailDraft] = useState('');
 
   const activeTemplates = useMemo(() => templates.filter((t) => isTruthy(t.is_active)), [templates]);
+
+  // Redundancy in the sheet. A repeated applicant_id makes every action target
+  // the first matching row silently, so it is worth surfacing where the rows
+  // actually are — see lib/duplicates.ts.
+  const duplicates = useMemo(() => findDuplicates(applicants), [applicants]);
+  const dupIds = useMemo(() => duplicateIds(duplicates), [duplicates]);
 
   // Categories actually in use, for the filter dropdown — no point offering
   // "Lead" to filter by if nobody has that category. The assignment picker
@@ -140,8 +153,24 @@ export function MailView({ applicants, templates, roles, categories: configCateg
     setSelectedId(id);
     setCompose(EMPTY_COMPOSE);
     setAttachError(null);
-    setCategoryDraft(applicants.find((a) => a.applicant_id === id)?.category ?? '');
+    const row = applicants.find((a) => a.applicant_id === id);
+    setCategoryDraft(row?.category ?? '');
+    setEmailDraft(row?.email ?? '');
     clear();
+  }
+
+  // The sheet is edited outside this app — by hand, by a form, by a paste — so
+  // this page can be stale the moment it loads. router.refresh() re-runs the
+  // server components (the page is force-dynamic, so that is a fresh read of
+  // Sheets) without a full navigation, keeping selection and scroll.
+  function refreshFromSheet() {
+    clear();
+    startRefresh(() => router.refresh());
+  }
+
+  async function saveEmail() {
+    if (!selected) return;
+    await run('set-email', { applicant_id: selected.applicant_id, email: emailDraft.trim() });
   }
 
   async function bulkAct(action: string) {
@@ -249,7 +278,35 @@ export function MailView({ applicants, templates, roles, categories: configCateg
         </button>
         <span className="spacer" />
         {checked.size ? <button className="ghost sm" onClick={() => setChecked(new Set())}>Clear selection</button> : null}
+        <span className="muted" style={{ fontSize: 12 }}>Sheet read {timeAgo(loadedAt)}</span>
+        <button
+          className="ghost sm" onClick={refreshFromSheet} disabled={refreshing}
+          title="Re-read the Applicants, Templates and Config tabs from Google Sheets"
+        >
+          {refreshing ? 'Refreshing…' : '⟳ Refresh from sheet'}
+        </button>
       </div>
+
+      {duplicates.length ? (
+        <div className="banner warn">
+          <span>!</span>
+          <div>
+            <strong>
+              {duplicates.length === 1 ? '1 duplicate' : `${duplicates.length} duplicates`} in the Applicants tab.
+            </strong>
+            <div className="hint" style={{ marginTop: 6 }}>
+              {duplicates.map((d) => (
+                <div key={`${d.kind}-${d.value}`}>
+                  {d.kind === 'applicant_id'
+                    ? <>Id <span className="mono">{d.value}</span> is on {d.rows.length} rows — every action on it silently hits the first one. </>
+                    : <><span className="mono">{d.value}</span> is on {d.rows.length} rows — they will be emailed {d.rows.length} times. </>}
+                  Sheet row{d.rows.length === 1 ? '' : 's'} {d.rows.map((r) => r._row).join(', ')}.
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {checked.size ? (
         <div className="toolbar">
@@ -373,6 +430,7 @@ export function MailView({ applicants, templates, roles, categories: configCateg
                       </div>
                       <div className="muted" style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                         {a.job_role} <StagePill stage={a.stage} /> <CategoryPill category={a.category} />
+                        {dupIds.has(a.applicant_id) ? <span className="pill warn" title="Shares an id or email with another row">duplicate</span> : null}
                       </div>
                       <div className="inbox-item-snippet muted">
                         {a.sent_at ? `Last emailed ${timeAgo(a.sent_at)}` : 'Not emailed yet.'}
@@ -396,7 +454,7 @@ export function MailView({ applicants, templates, roles, categories: configCateg
               <div className="toolbar" style={{ marginBottom: 4 }}>
                 <div>
                   <h2 style={{ margin: 0 }}>{selected.name || '(no name)'}</h2>
-                  <div className="muted mono" style={{ fontSize: 12 }}>{selected.email}</div>
+                  <div className="muted mono" style={{ fontSize: 12 }}>{selected.email || 'no email address'}</div>
                 </div>
                 <span className="spacer" />
                 <StagePill stage={selected.stage} />
@@ -406,6 +464,21 @@ export function MailView({ applicants, templates, roles, categories: configCateg
                 <span className="muted" style={{ fontSize: 13 }}>
                   {selected.job_role || 'No role'} · <span className="mono">{selected.applicant_id}</span>
                 </span>
+              </div>
+              {/* A row can arrive with a missing or typo'd address; sending
+                  refuses those, so it is fixable here rather than in the sheet. */}
+              <div className="toolbar" style={{ marginTop: 6, marginBottom: 0 }}>
+                <span className="muted" style={{ fontSize: 12 }}>Email</span>
+                <input
+                  type="email" value={emailDraft} onChange={(e) => setEmailDraft(e.target.value)}
+                  placeholder="name@example.com" style={{ width: 260 }}
+                />
+                <button
+                  className="sm" disabled={busy !== null || !emailDraft.trim() || emailDraft.trim() === (selected.email || '')}
+                  onClick={saveEmail}
+                >
+                  {busy === 'set-email' ? 'Saving…' : 'Save'}
+                </button>
               </div>
               <div className="toolbar" style={{ marginTop: 6, marginBottom: 0 }}>
                 <span className="muted" style={{ fontSize: 12 }}>Category</span>

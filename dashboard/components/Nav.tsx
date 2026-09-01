@@ -6,7 +6,7 @@ import { useEffect, useRef } from 'react';
 // "/" is the whole app (components/MailView.tsx): the candidate list, the
 // bulk pipeline actions, and the per-candidate composer, in one view.
 const LINKS = [
-  { href: '/', label: 'Candidates' },
+  { href: '/', label: 'Inbox' },
   { href: '/templates', label: 'Templates' },
   { href: '/console', label: 'Console' },
   { href: '/settings', label: 'Settings' },

@@ -98,6 +98,10 @@ function buildDemoStore(): Record<TabName, Row[]> {
       { applicant_id: 'APP-1004', name: 'Karan Mehta', email: 'karan.mehta@example.com', job_role: 'Backend Engineer', category: 'Senior', stage: 'SENT', template_id: 'TPL-DEFAULT', email_subject: 'Your application for Backend Engineer at 3Space', email_html: '<p>Hi Karan,</p><p>Thanks for applying — we would like to set up a call this week.</p>', sent_at: ago(2 * DAY), created_at: ago(5 * DAY), updated_at: ago(2 * DAY) },
       { applicant_id: 'APP-1005', name: 'Neha Verma', email: 'neha.verma@example.com', job_role: 'Frontend Engineer', category: 'Junior', stage: 'REPLIED', email_subject: 'Your application for Frontend Engineer at 3Space', email_html: '<p>Hi Neha,</p><p>Thanks for applying for the Frontend Engineer role.</p>', sent_at: ago(3 * DAY), created_at: ago(6 * DAY), updated_at: ago(1 * HOUR) },
       { applicant_id: 'APP-1006', name: 'Not An Email', email: 'oops-at-example', job_role: 'Frontend Engineer', category: 'Junior', stage: 'NEW', error_code: 'E-VALIDATION', error_message: 'email does not look like a valid address', created_at: ago(30 * MIN), updated_at: ago(30 * MIN) },
+      // Deliberate redundancy: Asha applied a second time through the form, so
+      // the sheet holds her address twice. Shows what findDuplicates() catches
+      // (lib/duplicates.ts) without anyone having to break the data by hand.
+      { applicant_id: 'APP-1008', name: 'Asha Menon', email: 'asha.menon@example.com', job_role: 'Frontend Engineer', category: 'Junior', notes: 'Applied twice through the form.', stage: 'NEW', created_at: ago(20 * MIN), updated_at: ago(20 * MIN) },
       { applicant_id: 'APP-1007', name: 'Dev Patel', email: 'dev.patel@example.com', job_role: 'Product Designer', category: 'Mid', stage: 'FAILED', error_code: 'E-LLM-EMPTY', error_message: 'Model returned an empty draft after 3 retries', created_at: ago(8 * DAY), updated_at: ago(7 * DAY) },
     ]); })(),
 

@@ -11,6 +11,7 @@ app/api/action/route.ts   EVERY mutating action, and every safety gate
 app/api/login|logout/     shared-password session
 
 lib/contract.ts           hand-mirror of ../lib/schema.js (parity-tested)
+lib/duplicates.ts         repeated applicant_id / email detection
 lib/sheets.ts             all Sheets I/O + the demo dataset
 lib/mailer.ts             all outbound email (Resend, over plain fetch)
 lib/template.ts           merge fields, HTML validation, template choice, the branded shell
@@ -49,6 +50,7 @@ All in `app/api/action/route.ts`:
 | `FIELD_RE` leftover check | An unresolved `{{field}}` fails with `E-MAIL-TEMPLATE`. |
 | `a.sent_at` | Duplicate-send guard. |
 | `validateHtml()` | Rejects malformed or dangerous markup before it can be sent. |
+| `set-email` collision check | Refuses to put one address on two rows, rather than only reporting it later. |
 
 EmailLog is appended **before** the Applicants patch, deliberately: if the sheet
 write fails after a real send, the error says *"the email has already gone out —
@@ -95,3 +97,5 @@ column takes down the whole tab, not just the new feature.
   OAuth provider would slot in.
 - Every page reads whole tabs; no pagination.
 - No reply ingestion — candidates reply to `company_email` and a human reads it.
+- Nothing dedupes the sheet automatically; `lib/duplicates.ts` reports, it never
+  deletes. Removing a row is a human decision.
