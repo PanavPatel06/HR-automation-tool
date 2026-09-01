@@ -161,17 +161,21 @@ function buildMime({ to, subject, html, text, inReplyTo, references, attachments
     `--${boundaryMixed}`,
     `Content-Type: multipart/alternative; boundary="${boundaryAlt}"`,
     '',
+    // base64, not 7bit: a candidate's name, a ₹ figure or a smart quote in a
+    // template is non-ASCII, and declaring 7bit while sending those bytes
+    // gets the body mangled rather than rejected — silent, and only visible
+    // in the recipient's inbox.
     `--${boundaryAlt}`,
     'Content-Type: text/plain; charset="UTF-8"',
-    'Content-Transfer-Encoding: 7bit',
+    'Content-Transfer-Encoding: base64',
     '',
-    plain,
+    wrapBase64(Buffer.from(plain, 'utf8').toString('base64')),
     '',
     `--${boundaryAlt}`,
     'Content-Type: text/html; charset="UTF-8"',
-    'Content-Transfer-Encoding: 7bit',
+    'Content-Transfer-Encoding: base64',
     '',
-    html,
+    wrapBase64(Buffer.from(html, 'utf8').toString('base64')),
     '',
     `--${boundaryAlt}--`,
   ].join('\r\n');
