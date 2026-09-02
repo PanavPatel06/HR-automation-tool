@@ -1,0 +1,536 @@
+<title>3Space Hiring User Manual</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@400;600;700&display=swap">
+<style>
+  /* Companion volume to the Deployment Manual — same ink, same type system,
+     same oxide-red signal reserved for things that reach a real person. This
+     one is organised by screen, because that is how someone reads it: with
+     the app open in front of them. */
+  :root {
+    --paper:      #ffffff;
+    --paper-sunk: #f6f4f0;
+    --ink:        #14120f;
+    --ink-soft:   #55504a;
+    --ink-faint:  #8a847c;
+    --rule:       #dcd6cc;
+    --rule-firm:  #14120f;
+    --signal:     #9c3018;
+    --signal-bg:  #fbf2ef;
+    --serif: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+    --sans:  "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono:  "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #14140f; --paper-sunk: #1e1e18; --ink: #f0ece4;
+      --ink-soft: #b3ada2; --ink-faint: #837d73; --rule: #34342c;
+      --rule-firm: #f0ece4; --signal: #e08163; --signal-bg: #2a1c17;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #14140f; --paper-sunk: #1e1e18; --ink: #f0ece4;
+    --ink-soft: #b3ada2; --ink-faint: #837d73; --rule: #34342c;
+    --rule-firm: #f0ece4; --signal: #e08163; --signal-bg: #2a1c17;
+  }
+
+  * { box-sizing: border-box; }
+  body { background: var(--paper); color: var(--ink); font-family: var(--sans); font-size: 10.5pt; line-height: 1.62; -webkit-font-smoothing: antialiased; }
+  .sheet { max-width: 44rem; margin: 0 auto; padding: 4rem 2rem 6rem; }
+
+  .masthead { border-bottom: 2.5px solid var(--rule-firm); padding-bottom: 1.5rem; margin-bottom: 2.5rem; }
+  .eyebrow { font-family: var(--mono); font-size: 8pt; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 1.6rem; }
+  h1 { font-family: var(--serif); font-weight: 700; font-size: 30pt; line-height: 1.08; letter-spacing: -0.018em; margin: 0 0 0.5rem; text-wrap: balance; }
+  .standfirst { font-family: var(--serif); font-size: 12.5pt; line-height: 1.5; color: var(--ink-soft); margin: 0; max-width: 34rem; }
+  .meta { display: flex; flex-wrap: wrap; gap: 0.5rem 1.75rem; font-family: var(--mono); font-size: 8pt; letter-spacing: 0.04em; color: var(--ink-faint); margin-top: 1.5rem; }
+
+  .phase { display: flex; align-items: baseline; gap: 1.1rem; margin: 0 0 0.35rem; padding-top: 2.75rem; border-top: 1px solid var(--rule); }
+  .phase-n { font-family: var(--mono); font-size: 8.5pt; font-weight: 600; letter-spacing: 0.14em; color: var(--signal); white-space: nowrap; padding-top: 0.35rem; }
+  .phase h2 { font-family: var(--serif); font-weight: 600; font-size: 19pt; line-height: 1.16; letter-spacing: -0.012em; margin: 0; flex: 1; text-wrap: balance; }
+  .phase-intro { color: var(--ink-soft); margin: 0.35rem 0 1.5rem 0; }
+
+  h3 { font-family: var(--sans); font-weight: 600; font-size: 11pt; margin: 2rem 0 0.65rem; }
+  h4 { font-family: var(--mono); font-size: 8pt; font-weight: 600; letter-spacing: 0.13em; text-transform: uppercase; color: var(--ink-faint); margin: 2.25rem 0 0.75rem; }
+
+  p { margin: 0 0 0.85rem; }
+  strong { font-weight: 600; }
+  a { color: inherit; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 2px; }
+  ol, ul { margin: 0 0 0.95rem; padding-left: 1.35rem; }
+  li { margin-bottom: 0.42rem; padding-left: 0.15rem; }
+  li::marker { color: var(--ink-faint); font-family: var(--mono); font-size: 9pt; }
+
+  code { font-family: var(--mono); font-size: 0.88em; background: var(--paper-sunk); padding: 0.1em 0.34em; border-radius: 2px; word-break: break-word; }
+  pre { font-family: var(--mono); font-size: 8.5pt; line-height: 1.55; background: var(--paper-sunk); border-left: 2px solid var(--rule-firm); padding: 0.9rem 1.1rem; margin: 0 0 1rem; overflow-x: auto; break-inside: avoid; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .cmt { color: var(--ink-faint); }
+
+  /* A named control in the interface. */
+  .ui {
+    font-family: var(--sans); font-size: 0.9em; font-weight: 500;
+    border: 1px solid var(--rule); border-bottom-width: 2px;
+    border-radius: 3px; padding: 0.05em 0.4em; white-space: nowrap;
+    background: var(--paper-sunk);
+  }
+
+  .tw { overflow-x: auto; margin: 0 0 1.15rem; break-inside: avoid; }
+  table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+  th { font-family: var(--mono); font-size: 7.5pt; font-weight: 600; letter-spacing: 0.11em; text-transform: uppercase; color: var(--ink-faint); text-align: left; padding: 0 0.7rem 0.45rem 0; border-bottom: 1.5px solid var(--rule-firm); white-space: nowrap; }
+  td { padding: 0.52rem 0.7rem 0.52rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; font-variant-numeric: tabular-nums; }
+  th:last-child, td:last-child { padding-right: 0; }
+  td code { font-size: 0.86em; }
+  .col-key { width: 28%; font-weight: 500; }
+
+  .note, .warn { padding: 0.85rem 0 0.85rem 1.1rem; margin: 0 0 1.15rem; break-inside: avoid; font-size: 10pt; }
+  .note { border-left: 2px solid var(--rule); color: var(--ink-soft); }
+  .warn { border-left: 2px solid var(--signal); background: var(--signal-bg); padding-right: 1.1rem; }
+  .warn .lede { color: var(--signal); font-weight: 600; }
+  .note > :last-child, .warn > :last-child { margin-bottom: 0; }
+
+  /* Stage machine, as a printable row of states. */
+  .flow {
+    font-family: var(--mono); font-size: 8.5pt; letter-spacing: 0.04em;
+    background: var(--paper-sunk); border-left: 2px solid var(--rule-firm);
+    padding: 1rem 1.1rem; margin: 0 0 1.15rem; line-height: 2.1;
+    break-inside: avoid; overflow-x: auto;
+  }
+  .flow .s { border: 1px solid var(--ink-faint); padding: 0.15em 0.5em; border-radius: 2px; white-space: nowrap; }
+  .flow .arr { color: var(--ink-faint); padding: 0 0.35em; }
+  .flow .lbl { display: block; font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.13em; color: var(--ink-faint); margin-top: 0.9rem; line-height: 1.6; }
+  .flow .lbl:first-child { margin-top: 0; }
+
+  .end { margin-top: 3.5rem; padding-top: 1.25rem; border-top: 2.5px solid var(--rule-firm); font-family: var(--mono); font-size: 8pt; letter-spacing: 0.04em; color: var(--ink-faint); line-height: 1.9; }
+
+  @page { size: A4; margin: 16mm 15mm 18mm; }
+  @media print {
+    :root {
+      --paper: #ffffff; --paper-sunk: #f6f4f0; --ink: #14120f;
+      --ink-soft: #55504a; --ink-faint: #8a847c; --rule: #dcd6cc;
+      --rule-firm: #14120f; --signal: #9c3018; --signal-bg: #fbf2ef;
+    }
+    body { font-size: 9.6pt; }
+    .sheet { max-width: none; padding: 0; margin: 0; }
+    .break { break-before: page; }
+    .phase { break-after: avoid; padding-top: 0.5rem; }
+    h3, h4 { break-after: avoid; }
+    pre, .tw, .note, .warn, .flow { break-inside: avoid; }
+    a { text-decoration: none; }
+  }
+
+  @media (max-width: 640px) {
+    .sheet { padding: 2rem 1.15rem 3rem; }
+    h1 { font-size: 24pt; }
+    .phase { flex-wrap: wrap; gap: 0.4rem 1rem; }
+  }
+</style>
+
+<div class="sheet">
+
+  <header class="masthead">
+    <p class="eyebrow">3Space · Hiring Automation</p>
+    <h1>User Manual</h1>
+    <p class="standfirst">Every screen, every button, and what happens when you press it. Written for the people doing the hiring, not the people who set the tool up.</p>
+    <div class="meta">
+      <span>Four screens</span>
+      <span>Two ways to work</span>
+      <span>Nothing sends without a human</span>
+    </div>
+  </header>
+
+  <div class="phase">
+    <span class="phase-n">START</span>
+    <h2>The idea in one minute</h2>
+  </div>
+
+  <p>Your candidates live in a Google Sheet. This dashboard reads that sheet, helps you write to people, and writes the result back. There is nothing else to learn: if a name is in the sheet, it is in the app, and every change the app makes appears in the sheet.</p>
+
+  <p>There are <strong>two ways to work</strong>, and knowing which one you are in explains most of the interface:</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Way</th><th>What it is for</th><th>Where</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="col-key">The pipeline</td>
+          <td>Forty applicants for one role, all getting the same kind of email. Tick them, generate drafts, read, approve, send in one go.</td>
+          <td>Top toolbar of the Inbox</td>
+        </tr>
+        <tr>
+          <td class="col-key">The composer</td>
+          <td>One person, one message. Say what it should cover in plain English; the model writes it using their details from the sheet.</td>
+          <td>Right-hand panel of the Inbox</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Both end in the same place — a real email from a real mailbox — and both stop for a human before they get there.</p>
+
+  <h4>The four screens</h4>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Screen</th><th>What it is for</th></tr></thead>
+      <tbody>
+        <tr><td class="col-key">Inbox</td><td>Everyone in the pipeline, and the composer. Where you spend your day.</td></tr>
+        <tr><td class="col-key">Templates</td><td>The reusable emails, and their tone. Generate, preview, activate, attach a file.</td></tr>
+        <tr><td class="col-key">Console</td><td>Diagnostics: the credential check, and the log of every send ever attempted.</td></tr>
+        <tr><td class="col-key">Settings</td><td>The master switches — dry run, drafting, sending — and the branding values.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>A light/dark toggle sits at the end of the navigation bar. It only changes how the app looks to you.</p>
+
+  <div class="phase break">
+    <span class="phase-n">SCREEN 1</span>
+    <h2>Inbox</h2>
+  </div>
+  <p class="phase-intro">Everyone from the Applicants tab, newest activity first.</p>
+
+  <h3>The banner at the top</h3>
+  <p>Read this before anything else. It has three states and it tells you whether your clicks will reach real people.</p>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Banner</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td class="col-key">Dry run is on</td><td>Nothing leaves the building. Sends are recorded in the log and marked <em>dry run</em>. Safe to experiment.</td></tr>
+        <tr><td class="col-key">Live sending is enabled</td><td>Emails reach real candidates. The Send buttons turn red as a second reminder.</td></tr>
+        <tr><td class="col-key">Sending is broken</td><td>Dry run is off but no mailbox is configured. Every send is <em>refused</em> — nothing is quietly recorded as sent. Tell whoever set the app up.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>The six counters</h3>
+  <p>Total · Awaiting draft · Awaiting approval · Ready to send · Sent · Needs attention.</p>
+  <p><strong>Needs attention</strong> is the one to watch: it combines rows that failed with duplicate rows. Anything above zero deserves a look before a bulk send.</p>
+
+  <h3>The pipeline toolbar</h3>
+  <p>These four act on everyone you have <strong>ticked</strong> in the list. They are deliberately greyed out unless every ticked row is at the right stage — you cannot approve something that was never drafted.</p>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Button</th><th>Does</th><th>Works on rows at</th></tr></thead>
+      <tbody>
+        <tr><td class="col-key"><span class="ui">Generate drafts</span></td><td>Picks the best matching template for each person and writes their email into the sheet.</td><td>NEW, DRAFTED, FAILED</td></tr>
+        <tr><td class="col-key"><span class="ui">Approve</span></td><td>Marks a draft as fit to send. A human reading it is the whole point.</td><td>DRAFTED</td></tr>
+        <tr><td class="col-key"><span class="ui">Unapprove</span></td><td>Takes it back for another edit.</td><td>APPROVED</td></tr>
+        <tr><td class="col-key"><span class="ui">Send</span></td><td>Sends every approved draft. Always asks first, listing the addresses.</td><td>APPROVED</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>The Send button reads <span class="ui">Dry-run send</span> while dry run is on, and turns red reading <span class="ui">Send</span> when it is off. The confirmation lists the first twelve recipients so you can see who is about to be emailed.</p>
+
+  <h3>Refresh from sheet</h3>
+  <p>The sheet can be edited by anyone at any time — by hand, by a paste, by a colleague — so the page can go stale while you look at it. <span class="ui">⟳ Refresh from sheet</span> re-reads it without losing your place, your selection, or your scroll position. The label beside it says how long ago the data was read.</p>
+  <p>Refresh after anyone pastes new rows in, and before any bulk send.</p>
+
+  <h3>The duplicates warning</h3>
+  <p>If two rows share an <code>applicant_id</code> or an email address, a warning appears naming the exact sheet rows, and every affected row gets a <span class="ui">duplicate</span> tag in the list.</p>
+  <div class="warn">
+    <p><span class="lede">A repeated id is the dangerous one.</span> Actions find a person by id and take the <em>first</em> row that matches, so acting on the second one silently changes the first. You would see a success message naming the right person while the wrong row moved. A repeated email is milder — that person simply gets the email twice. Fix both in the sheet, then press Refresh.</p>
+  </div>
+
+  <h3>Finding people</h3>
+  <ul>
+    <li><strong>Search</strong> covers name, email, id, role and notes.</li>
+    <li><strong>Three filters</strong> — role, stage, category — combine with each other and with the search.</li>
+    <li><strong>Group by</strong> stacks the list under headings by category, stage or role. Useful for seeing an entire role's pipeline at once.</li>
+    <li><strong>Bulk category</strong>: tick several people and a box appears to set the category on all of them.</li>
+  </ul>
+
+  <h3>Adding someone</h3>
+  <p><span class="ui">+ New</span> adds a row to the Applicants tab without opening the spreadsheet. Only the email is required; role and category offer suggestions from what already exists.</p>
+  <p>Fill in <strong>Notes</strong> if you can. It is passed to the model verbatim and it is the difference between a generic email and one that mentions where you met them.</p>
+
+  <h3>The candidate panel</h3>
+  <p>Select someone and the right-hand side fills in: their name, address, stage, category, role and id, then their notes in italics, then the last email that was sent to them.</p>
+  <p>Two fields are editable right there, each with its own <span class="ui">Save</span>:</p>
+  <ul>
+    <li><strong>Email</strong> — for fixing a typo or filling in a blank. A send to a malformed address is refused, so this saves a trip to the spreadsheet. The app will not let you save an address that already belongs to someone else.</li>
+    <li><strong>Category</strong> — affects which template matches them.</li>
+  </ul>
+  <p>Each Save button stays greyed out until you actually change the value.</p>
+
+  <div class="phase break">
+    <span class="phase-n">SCREEN 1B</span>
+    <h2>Writing to one person</h2>
+  </div>
+  <p class="phase-intro">The composer, in the order you use it.</p>
+
+  <h3>1 · Say what the email should cover</h3>
+  <p>Plain English, in the big box. You are briefing a colleague, not writing the email:</p>
+<pre><code>invite her to a 30-minute intro call next week, mention it is
+remote, ask for two possible time slots</code></pre>
+  <p><strong>You never type their name, role or your company details.</strong> Those come from their sheet row and the branding settings. Being specific about the <em>content</em> is what improves the result — being specific about the person is already done for you.</p>
+
+  <h3>2 · Base it on a template (optional)</h3>
+  <p>Only active templates appear here. Choosing one gives the model a structure and tone to follow. Leaving it on <em>No template</em> lets the model write from your brief alone.</p>
+
+  <h3>3 · Fill the boxes</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Button</th><th>What it does</th><th>Needs</th></tr></thead>
+      <tbody>
+        <tr><td class="col-key"><span class="ui">✨ Write with AI</span></td><td>Writes a fresh email from your brief, their details and the template's tone.</td><td>A brief, or a template</td></tr>
+        <tr><td class="col-key"><span class="ui">Use template as-is</span></td><td>Fills the template in with their details. No model involved, instant, free.</td><td>A template</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Both only ever <em>fill the boxes below</em>. Nothing is sent, and nothing is saved to the sheet, until you press Send yourself. Run <span class="ui">✨ Write with AI</span> as many times as you like; each press replaces what is there.</p>
+
+  <h3>4 · Read it and edit it</h3>
+  <p>Subject and Message are ordinary text boxes — edit freely. The message is HTML, so <code>&lt;p&gt;</code> makes a paragraph and <code>&lt;br&gt;</code> a line break, but you can also just type sentences. <span class="ui">Preview</span> underneath shows it as the recipient will see it.</p>
+
+  <div class="warn">
+    <p><span class="lede">Always read it before sending.</span> The model is fast and usually good, and neither of those is the same as correct. It is writing to a real person about their job.</p>
+  </div>
+
+  <h3>5 · Attach files (optional)</h3>
+  <p><span class="ui">📎 Attach files</span> takes files from your computer for this one email. Several at a time, up to 15MB total; each appears as a removable chip. For a file that should go out with <em>every</em> use of a template, set it on the template instead — see the next screen.</p>
+
+  <h3>6 · Send</h3>
+  <p>The button reads <span class="ui">Send</span>, or a red <span class="ui">Send for real</span> when dry run is off. It stays greyed out until the subject and message are both filled and no <code>{{field}}</code> remains.</p>
+
+  <div class="note">
+    <p>If you see <em>"Still has an unfilled <code>{{field}}</code>"</em>, some placeholder never got a value — often because that person's row is missing a detail. Type over it, or fill the cell in the sheet and refresh. The app blocks the send rather than mail somebody a literal <code>{{name}}</code>.</p>
+  </div>
+
+  <div class="phase break">
+    <span class="phase-n">SCREEN 2</span>
+    <h2>Templates</h2>
+  </div>
+  <p class="phase-intro">Reusable emails. This is where the house tone lives.</p>
+
+  <h3>Generating one</h3>
+  <p>Describe the email — purpose, tone, optionally a role and extra instructions — and press <span class="ui">Generate</span>.</p>
+  <div class="warn">
+    <p><span class="lede">Generated templates arrive switched off.</span> They are saved <em>inactive</em> and cannot be used until you preview one and press <span class="ui">Activate</span>. Nothing a model wrote can reach a candidate before a person has read it.</p>
+  </div>
+
+  <h3>Reading the table</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Column</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td class="col-key">Scope</td><td>Which role and category it is for. <span class="ui">default</span> marks the fallback used when nothing else fits.</td></tr>
+        <tr><td class="col-key">AI</td><td><span class="ui">personalised</span> means it contains <code>{{ai_body}}</code>, so each use writes a fresh paragraph for that person and spends model quota. <span class="ui">static</span> means the same words every time, and costs nothing.</td></tr>
+        <tr><td class="col-key">File</td><td>An attachment that goes out with every send. Click it to check the link.</td></tr>
+        <tr><td class="col-key">Status</td><td><span class="ui">active</span> templates can be used; <span class="ui">inactive</span> ones are invisible everywhere else in the app.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preview, activate, attach</h3>
+  <p><span class="ui">Preview</span> opens the template rendered as an email, with its raw HTML underneath if you want it. From there you can also set an attachment.</p>
+  <p>Attachments are a <strong>public link</strong>, not an upload — a Google Drive file shared "anyone with the link", or any other public URL. It is fetched fresh at send time, so replacing the file at that link updates every future email with no template edit. Nothing over 15MB will send.</p>
+
+  <h3>How a template gets chosen</h3>
+  <p>When you press <span class="ui">Generate drafts</span> in bulk, the app scores every active template against each person:</p>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Situation</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td>Template's role matches theirs</td><td>Strongly preferred</td></tr>
+        <tr><td>Template is for a <em>different</em> role</td><td>Disqualified — never used by mistake</td></tr>
+        <tr><td>Category also matches</td><td>Preferred over role alone</td></tr>
+        <tr><td>Nothing fits</td><td>Falls back to the default, and records that it did</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>So: one <span class="ui">default</span> template as a safety net, plus a specific one per role. Leave a template's role blank to let it apply to anybody.</p>
+
+  <h4>Merge fields</h4>
+  <p>Anything in double braces is replaced per person.</p>
+  <div class="tw">
+    <table>
+      <thead><tr><th>From their row</th><th>From Settings</th><th>Special</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>
+            <code>{{name}}</code><br><code>{{first_name}}</code><br><code>{{email}}</code><br>
+            <code>{{job_role}}</code><br><code>{{category}}</code><br><code>{{applicant_id}}</code>
+          </td>
+          <td>
+            <code>{{company_name}}</code><br><code>{{hr_name}}</code><br><code>{{hr_signature}}</code><br>
+            <code>{{company_email}}</code><br><code>{{company_phone}}</code><br><code>{{company_logo_url}}</code>
+          </td>
+          <td><code>{{ai_body}}</code><br><span style="color:var(--ink-faint)">a paragraph written per person</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>A field with no value is left visible rather than silently removed, which is what makes the "unfilled field" block possible.</p>
+
+  <div class="phase break">
+    <span class="phase-n">SCREEN 3</span>
+    <h2>Settings</h2>
+  </div>
+  <p class="phase-intro">Three switches that matter, and the values every email is built from.</p>
+
+  <h3>Dry run</h3>
+  <p>The banner at the top, with a button reading <span class="ui">Go live</span> or <span class="ui">Back to dry run</span>. Turning it off asks for confirmation, because it is the single switch between practising and emailing real people.</p>
+  <p>Leave it <strong>on</strong> while learning, while testing a new template, and any time you are unsure. Sends are still logged, so a dry run tells you exactly what would have happened.</p>
+
+  <h3>The two master switches</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Switch</th><th>Controls</th></tr></thead>
+      <tbody>
+        <tr><td class="col-key">Drafting</td><td>The <span class="ui">Generate drafts</span> action. Off means no model quota can be spent in bulk.</td></tr>
+        <tr><td class="col-key">Sending</td><td>Every send, bulk and one-off. Off by default — turn it on deliberately.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>These take effect on the next click, with no restart. They are also enforced behind the scenes, so switching one off genuinely stops the action rather than only hiding the button.</p>
+
+  <h3>Other settings</h3>
+  <p>Shown read-only, edited in the Config tab of the spreadsheet. These are the values every email is built from — company name, the signature, the phone numbers, the reply-to address, the daily cap.</p>
+  <p>Change one and every future email changes with it. Nothing already sent is affected.</p>
+
+  <div class="phase break">
+    <span class="phase-n">SCREEN 4</span>
+    <h2>Console</h2>
+  </div>
+  <p class="phase-intro">Where you go when something looks wrong.</p>
+
+  <h3>Preflight</h3>
+  <p><span class="ui">Run preflight</span> checks every credential without sending anything or writing a row: the sheet is reachable, its columns are right, the model answers, the mailbox logs in, and there are no duplicate ids or malformed addresses.</p>
+  <p>Run it after any change to the spreadsheet's structure, and before a big send. If a check fails it names the fix.</p>
+
+  <h3>The email log</h3>
+  <p>Every send attempt ever made, newest first, with three counters above it: delivered today, failed today, logged all time.</p>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Result</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td class="col-key"><span class="ui">sent</span></td><td>Genuinely delivered to the mail server.</td></tr>
+        <tr><td class="col-key"><span class="ui">dry run</span></td><td>Simulated. Nothing was delivered.</td></tr>
+        <tr><td class="col-key"><span class="ui">failed</span></td><td>Rejected. Hover the tag for the reason.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>The log is written <em>before</em> the candidate's row is updated, so a send can never be missing from it. It is the honest record — if the two ever disagree, believe the log.</p>
+  <p>Every real send also lands in the sending account's Gmail Sent folder, which is a second, independent copy.</p>
+
+  <div class="phase break">
+    <span class="phase-n">REFERENCE</span>
+    <h2>Stages</h2>
+  </div>
+  <p class="phase-intro">The tag on every candidate. It is the app's memory of where you left off.</p>
+
+  <div class="flow">
+    <span class="lbl">The normal path</span>
+    <span class="s">NEW</span><span class="arr">→</span><span class="s">DRAFTED</span><span class="arr">→</span><span class="s">APPROVED</span><span class="arr">→</span><span class="s">SENT</span><span class="arr">→</span><span class="s">REPLIED</span><span class="arr">→</span><span class="s">CLOSED</span>
+    <span class="lbl">When something goes wrong</span>
+    <span class="s">FAILED</span><span class="arr">→</span> back to any earlier stage, so a retry is always possible
+  </div>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Stage</th><th>Means</th><th>Set by</th></tr></thead>
+      <tbody>
+        <tr><td class="col-key">NEW</td><td>In the sheet, nothing written yet.</td><td>You, adding them</td></tr>
+        <tr><td class="col-key">DRAFTED</td><td>An email exists and is waiting to be read.</td><td>Generate drafts</td></tr>
+        <tr><td class="col-key">APPROVED</td><td>A human read it and it is fit to send.</td><td>Approve</td></tr>
+        <tr><td class="col-key">SENT</td><td>It left the building.</td><td>Send</td></tr>
+        <tr><td class="col-key">REPLIED</td><td>They answered. Set by hand — replies arrive in a real mailbox, not here.</td><td>You, in the sheet</td></tr>
+        <tr><td class="col-key">CLOSED</td><td>Finished with. The end of the line.</td><td>You, in the sheet</td></tr>
+        <tr><td class="col-key">FAILED</td><td>Something went wrong; the reason is in the row.</td><td>The app</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <p><strong>A failed send never claims to have worked.</strong> The row stays APPROVED with the error recorded, so you can fix the cause and press Send again without wondering whether it went out twice.</p>
+  </div>
+
+  <div class="phase break">
+    <span class="phase-n">REFERENCE</span>
+    <h2>Why is this button greyed out?</h2>
+  </div>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Button</th><th>Needs</th></tr></thead>
+      <tbody>
+        <tr><td class="col-key"><span class="ui">Generate drafts</span></td><td>At least one ticked, and every ticked row at NEW, DRAFTED or FAILED. Also the Drafting switch on.</td></tr>
+        <tr><td class="col-key"><span class="ui">Approve</span></td><td>Every ticked row at DRAFTED.</td></tr>
+        <tr><td class="col-key"><span class="ui">Unapprove</span></td><td>Every ticked row at APPROVED.</td></tr>
+        <tr><td class="col-key"><span class="ui">Send</span> (bulk)</td><td>Every ticked row at APPROVED, the Sending switch on, and a working mailbox.</td></tr>
+        <tr><td class="col-key"><span class="ui">✨ Write with AI</span></td><td>Something in the brief box, or a template chosen.</td></tr>
+        <tr><td class="col-key"><span class="ui">Use template as-is</span></td><td>A template chosen.</td></tr>
+        <tr><td class="col-key"><span class="ui">Send</span> (composer)</td><td>Subject and message filled, no <code>{{field}}</code> left, Sending switch on.</td></tr>
+        <tr><td class="col-key"><span class="ui">Save</span> (email, category)</td><td>A value that differs from what is already stored.</td></tr>
+        <tr><td class="col-key"><span class="ui">Add candidate</span></td><td>An email address.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Hovering a disabled button usually explains itself. If a whole row of buttons is dead, check the banner at the top of the Inbox first.</p>
+
+  <div class="phase break">
+    <span class="phase-n">REFERENCE</span>
+    <h2>Three recipes</h2>
+  </div>
+
+  <h3>Forty applicants for one role</h3>
+  <ol>
+    <li>Paste them into the Applicants tab, then press <span class="ui">⟳ Refresh from sheet</span>.</li>
+    <li>Clear the duplicates warning if one appears.</li>
+    <li>Filter to that role. Tick the ones you want.</li>
+    <li><span class="ui">Generate drafts</span>.</li>
+    <li><strong>Open several and read them.</strong> Not all forty — enough to trust the template.</li>
+    <li>Tick, <span class="ui">Approve</span>, then <span class="ui">Send</span>. Check the addresses in the confirmation.</li>
+    <li>Check the Console log afterwards.</li>
+  </ol>
+
+  <h3>One message to one person</h3>
+  <ol>
+    <li>Search their name, select them.</li>
+    <li>Check the email address is right; fix it there if not.</li>
+    <li>Type the brief. Pick a template if you want its tone.</li>
+    <li><span class="ui">✨ Write with AI</span>, read, edit.</li>
+    <li>Attach anything needed, then <span class="ui">Send</span>.</li>
+  </ol>
+
+  <h3>Someone new, not from the sheet</h3>
+  <ol>
+    <li><span class="ui">+ New</span>, fill in at least the email, and write a real note about them.</li>
+    <li>They are selected automatically — write to them straight away.</li>
+  </ol>
+
+  <div class="phase break">
+    <span class="phase-n">REFERENCE</span>
+    <h2>What the app will not let you do</h2>
+  </div>
+  <p class="phase-intro">Worth knowing, because it tells you how much you can safely experiment.</p>
+
+  <ul>
+    <li><strong>Nothing sends by itself.</strong> There is no schedule and no background job. Every email is a button a person pressed.</li>
+    <li><strong>The AI never sends.</strong> It only fills boxes you then read.</li>
+    <li><strong>Generated templates start inactive.</strong> A person has to activate them.</li>
+    <li><strong>Sending is off twice over</strong> by default — the dry run switch and the sending switch, both flipped deliberately.</li>
+    <li><strong>An unfilled <code>{{field}}</code> blocks the send</strong> rather than mailing someone a placeholder.</li>
+    <li><strong>A broken mailbox refuses sends</strong> rather than logging them as delivered.</li>
+    <li><strong>A failed send leaves the row unsent</strong>, so retrying is always safe.</li>
+    <li><strong>Bulk sends confirm first</strong>, listing who is about to be emailed.</li>
+  </ul>
+
+  <h4>If something looks wrong</h4>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Symptom</th><th>Try</th></tr></thead>
+      <tbody>
+        <tr><td class="col-key">Someone is missing</td><td>Press Refresh. Then check they have an <code>applicant_id</code> — rows without one are ignored.</td></tr>
+        <tr><td class="col-key">A change did not stick</td><td>Someone edited the sheet at the same time. Refresh and redo it.</td></tr>
+        <tr><td class="col-key">"Write with AI" does nothing</td><td>The model key is missing or out of quota. Console → Preflight will say.</td></tr>
+        <tr><td class="col-key">Emails are not arriving</td><td>Check dry run is off, Sending is on, and the log in Console. A <span class="ui">failed</span> tag names the reason.</td></tr>
+        <tr><td class="col-key">Broken logo in a received email</td><td>Expected when testing from a local machine; correct on the live site.</td></tr>
+        <tr><td class="col-key">First load is slow</td><td>The free hosting sleeps when idle. Around thirty seconds, once.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="end">
+    3Space · Hiring Automation — User Manual<br>
+    Setup and hosting are covered in the Deployment Manual. Error codes and architecture live in the repository README.
+  </div>
+
+</div>
