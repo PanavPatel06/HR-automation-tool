@@ -1,0 +1,703 @@
+<title>3Space Deployment Manual — Zoho Mail</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@400;600;700&display=swap">
+<style>
+  /* ---------------------------------------------------------------
+     A printed technical manual. Paper is the primary medium, screen
+     the secondary one — so the palette is ink on stock, hierarchy is
+     carried by weight, rule and numeral rather than by colour, and a
+     single oxide red is reserved for the four things that can cost
+     you a credential or a wrong send.
+     --------------------------------------------------------------- */
+  :root {
+    --paper:      #ffffff;
+    --paper-sunk: #f6f4f0;
+    --ink:        #14120f;
+    --ink-soft:   #55504a;
+    --ink-faint:  #8a847c;
+    --rule:       #dcd6cc;
+    --rule-firm:  #14120f;
+    --signal:     #9c3018;
+    --signal-bg:  #fbf2ef;
+    --serif: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+    --sans:  "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono:  "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  /* Screen-only dark reading. Print always resets to paper, below. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #14140f;
+      --paper-sunk: #1e1e18;
+      --ink:        #f0ece4;
+      --ink-soft:   #b3ada2;
+      --ink-faint:  #837d73;
+      --rule:       #34342c;
+      --rule-firm:  #f0ece4;
+      --signal:     #e08163;
+      --signal-bg:  #2a1c17;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #14140f;
+    --paper-sunk: #1e1e18;
+    --ink:        #f0ece4;
+    --ink-soft:   #b3ada2;
+    --ink-faint:  #837d73;
+    --rule:       #34342c;
+    --rule-firm:  #f0ece4;
+    --signal:     #e08163;
+    --signal-bg:  #2a1c17;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 10.5pt;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet {
+    max-width: 44rem;
+    margin: 0 auto;
+    padding: 4rem 2rem 6rem;
+  }
+
+  /* ---- masthead ---- */
+  .masthead { border-bottom: 2.5px solid var(--rule-firm); padding-bottom: 1.5rem; margin-bottom: 2.5rem; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 8pt;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 1.6rem;
+  }
+  h1 {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 30pt;
+    line-height: 1.08;
+    letter-spacing: -0.018em;
+    margin: 0 0 0.5rem;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-family: var(--serif);
+    font-size: 12.5pt;
+    line-height: 1.5;
+    color: var(--ink-soft);
+    margin: 0;
+    max-width: 34rem;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.75rem;
+    font-family: var(--mono);
+    font-size: 8pt;
+    letter-spacing: 0.04em;
+    color: var(--ink-faint);
+    margin-top: 1.5rem;
+  }
+
+  /* ---- phase headings ---- */
+  .phase {
+    display: flex;
+    align-items: baseline;
+    gap: 1.1rem;
+    margin: 0 0 0.35rem;
+    padding-top: 2.75rem;
+    border-top: 1px solid var(--rule);
+  }
+  .phase-n {
+    font-family: var(--mono);
+    font-size: 8.5pt;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    color: var(--signal);
+    white-space: nowrap;
+    padding-top: 0.35rem;
+  }
+  .phase h2 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 19pt;
+    line-height: 1.16;
+    letter-spacing: -0.012em;
+    margin: 0;
+    flex: 1;
+    text-wrap: balance;
+  }
+  .clock {
+    font-family: var(--mono);
+    font-size: 8pt;
+    color: var(--ink-faint);
+    white-space: nowrap;
+    padding-top: 0.5rem;
+  }
+  .phase-intro { color: var(--ink-soft); margin: 0.35rem 0 1.5rem 0; }
+
+  h3 {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 11pt;
+    letter-spacing: 0.005em;
+    margin: 2rem 0 0.65rem;
+  }
+  h3 .step {
+    font-family: var(--mono);
+    font-weight: 400;
+    color: var(--ink-faint);
+    margin-right: 0.5rem;
+    font-size: 9.5pt;
+  }
+  h4 {
+    font-family: var(--mono);
+    font-size: 8pt;
+    font-weight: 600;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 2.25rem 0 0.75rem;
+  }
+
+  p { margin: 0 0 0.85rem; }
+  strong { font-weight: 600; }
+  a { color: inherit; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 2px; }
+
+  ol, ul { margin: 0 0 0.95rem; padding-left: 1.35rem; }
+  li { margin-bottom: 0.42rem; padding-left: 0.15rem; }
+  li::marker { color: var(--ink-faint); font-family: var(--mono); font-size: 9pt; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--paper-sunk);
+    padding: 0.1em 0.34em;
+    border-radius: 2px;
+    word-break: break-word;
+  }
+
+  pre {
+    font-family: var(--mono);
+    font-size: 8.5pt;
+    line-height: 1.55;
+    background: var(--paper-sunk);
+    border-left: 2px solid var(--rule-firm);
+    padding: 0.9rem 1.1rem;
+    margin: 0 0 1rem;
+    overflow-x: auto;
+    break-inside: avoid;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .cmt { color: var(--ink-faint); }
+
+  /* ---- tables ---- */
+  .tw { overflow-x: auto; margin: 0 0 1.15rem; break-inside: avoid; }
+  table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+  th {
+    font-family: var(--mono);
+    font-size: 7.5pt;
+    font-weight: 600;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    text-align: left;
+    padding: 0 0.7rem 0.45rem 0;
+    border-bottom: 1.5px solid var(--rule-firm);
+    white-space: nowrap;
+  }
+  td {
+    padding: 0.52rem 0.7rem 0.52rem 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+    font-variant-numeric: tabular-nums;
+  }
+  th:last-child, td:last-child { padding-right: 0; }
+  td code { font-size: 0.86em; }
+  .col-key { width: 30%; font-weight: 500; }
+
+  /* ---- callouts ---- */
+  .note, .warn {
+    padding: 0.85rem 0 0.85rem 1.1rem;
+    margin: 0 0 1.15rem;
+    break-inside: avoid;
+    font-size: 10pt;
+  }
+  .note { border-left: 2px solid var(--rule); color: var(--ink-soft); }
+  .warn { border-left: 2px solid var(--signal); background: var(--signal-bg); padding-right: 1.1rem; }
+  .warn .lede { color: var(--signal); font-weight: 600; }
+  .note > :last-child, .warn > :last-child { margin-bottom: 0; }
+
+  /* ---- checkbox rows for the credential sheet ---- */
+  .fill {
+    font-family: var(--mono);
+    font-size: 9pt;
+    line-height: 2.1;
+    border-left: 2px solid var(--rule-firm);
+    background: var(--paper-sunk);
+    padding: 1rem 1.1rem;
+    margin: 0 0 1.15rem;
+    break-inside: avoid;
+  }
+  .fill .lbl { display: inline-block; min-width: 15rem; }
+  .fill .rule-line { border-bottom: 1px solid var(--ink-faint); display: inline-block; min-width: 11rem; }
+  .fill .grp {
+    display: block;
+    font-size: 7.5pt;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 1rem 0 0.25rem;
+    line-height: 1.6;
+  }
+  .fill .grp:first-child { margin-top: 0; }
+
+  .end {
+    margin-top: 3.5rem;
+    padding-top: 1.25rem;
+    border-top: 2.5px solid var(--rule-firm);
+    font-family: var(--mono);
+    font-size: 8pt;
+    letter-spacing: 0.04em;
+    color: var(--ink-faint);
+    line-height: 1.9;
+  }
+
+  /* ---- print ---- */
+  @page { size: A4; margin: 16mm 15mm 18mm; }
+
+  @media print {
+    :root {
+      --paper: #ffffff; --paper-sunk: #f6f4f0; --ink: #14120f;
+      --ink-soft: #55504a; --ink-faint: #8a847c; --rule: #dcd6cc;
+      --rule-firm: #14120f; --signal: #9c3018; --signal-bg: #fbf2ef;
+    }
+    body { font-size: 9.6pt; }
+    .sheet { max-width: none; padding: 0; margin: 0; }
+    .break { break-before: page; }
+    .phase { break-after: avoid; padding-top: 0.5rem; }
+    h3, h4 { break-after: avoid; }
+    pre, .tw, .note, .warn, .fill { break-inside: avoid; }
+    a { text-decoration: none; }
+    /* Spell the link out on paper, where it cannot be clicked. */
+    a[href^="http"]::after {
+      content: " (" attr(href) ")";
+      font-family: var(--mono);
+      font-size: 7.5pt;
+      color: var(--ink-faint);
+      word-break: break-all;
+    }
+    .masthead a::after, .end a::after { content: ""; }
+  }
+
+  @media (max-width: 640px) {
+    .sheet { padding: 2rem 1.15rem 3rem; }
+    h1 { font-size: 24pt; }
+    .phase { flex-wrap: wrap; gap: 0.4rem 1rem; }
+    .fill .lbl { min-width: 0; display: block; }
+  }
+</style>
+
+<div class="sheet">
+
+  <header class="masthead">
+    <p class="eyebrow">3Space · Hiring Automation</p>
+    <h1>Deployment Manual — Zoho Mail</h1>
+    <p class="standfirst">Setting up the hiring dashboard from nothing: a spreadsheet, a robot Google account, a Zoho app password, and one deploy. Six phases, about fifty minutes. The code is identical to the Gmail build — Zoho is four environment variables.</p>
+    <div class="meta">
+      <span>Company domain already on Zoho</span>
+      <span>No card required</span>
+      <span>No code changes</span>
+    </div>
+  </header>
+
+  <div class="phase">
+    <span class="phase-n">PHASE 0</span>
+    <h2>What you are building</h2>
+  </div>
+  <p class="phase-intro">One Next.js service on Render, talking to three outside things.</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Service</th><th>Role</th><th>Cost</th></tr></thead>
+      <tbody>
+        <tr><td class="col-key">Google Sheet</td><td>The database — candidates, templates, settings, log</td><td>Free</td></tr>
+        <tr><td class="col-key">Groq</td><td>Writes the emails</td><td>Free tier</td></tr>
+        <tr><td class="col-key">Zoho Mail SMTP</td><td>Sends them</td><td>Included with the mailbox; daily cap depends on plan</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>There is no separate backend and no other database. The sheet <em>is</em> the database — you type into it, the app reads and writes back to it.</p>
+
+  <div class="phase break">
+    <span class="phase-n">PHASE 1</span>
+    <h2>The spreadsheet</h2>
+    <span class="clock">10 min</span>
+  </div>
+
+  <h3><span class="step">1.1</span>Create it</h3>
+  <p>New Google Sheet, named anything. Look at the URL and copy the part between <code>/d/</code> and <code>/edit</code> — that is <code>SHEET_ID</code>.</p>
+<pre><code>https://docs.google.com/spreadsheets/d/1a2B3cD4eF5gH6iJ7kL8mN9oP/edit
+                                      └─────────────────────────┘
+                                              SHEET_ID</code></pre>
+
+  <h3><span class="step">1.2</span>Service account</h3>
+  <p>A <strong>service account</strong> is a robot Google account. Unlike a normal login it has no consent screen, no browser popup, and no token that expires — it is a key that works until you revoke it. That is why the project uses one.</p>
+  <p>At <a href="https://console.cloud.google.com">console.cloud.google.com</a>:</p>
+  <ol>
+    <li><strong>Create a project</strong> (top-left dropdown → New Project). Name it <code>hr-automation</code>.</li>
+    <li><strong>APIs &amp; Services → Library</strong> → search "Google Sheets API" → <strong>Enable</strong>. Miss this and every call fails with a 403.</li>
+    <li><strong>IAM &amp; Admin → Service Accounts → Create service account</strong>. Name it <code>hr-dashboard</code>. Skip the optional roles and access steps — they do not apply here.</li>
+    <li>Open it → <strong>Keys → Add key → Create new key → JSON</strong>. A <code>.json</code> file downloads.</li>
+  </ol>
+
+  <div class="warn">
+    <p><span class="lede">That file is a password.</span> Never commit it, never paste it into a chat or a ticket. It has full write access to every sheet you share with it.</p>
+  </div>
+
+  <h3><span class="step">1.3</span>Share the sheet with the robot</h3>
+  <p>Open the downloaded JSON and find <code>client_email</code>:</p>
+<pre><code>"client_email": "hr-dashboard@hr-automation-412....iam.gserviceaccount.com"</code></pre>
+  <p>Copy that address. In the spreadsheet → <strong>Share</strong> → paste it → <strong>Editor</strong> → Send.</p>
+
+  <div class="warn">
+    <p><span class="lede">This is the step everyone skips.</span> A service account cannot see a sheet just because you own it — you share it explicitly, exactly as you would with a person. Missing this produces <code>E-SHEET-PERM</code>.</p>
+  </div>
+
+  <div class="phase break">
+    <span class="phase-n">PHASE 2</span>
+    <h2>Zoho app password</h2>
+    <span class="clock">5 min</span>
+  </div>
+  <p class="phase-intro">A Zoho <strong>app password</strong> is a per-application password that logs into Zoho's SMTP server directly. The dashboard authenticates with it exactly as it would with Gmail — no code path changes.</p>
+
+  <ol>
+    <li>Sign in to the sending mailbox at <a href="https://mail.zoho.com">mail.zoho.com</a> (or <a href="https://mail.zoho.in">mail.zoho.in</a> for India-hosted accounts).</li>
+    <li>Turn on multi-factor auth: <strong>Settings → Security → Multi-Factor Authentication → enable</strong>. Without it, Zoho will not create an app password.</li>
+    <li>Go to <a href="https://accounts.zoho.com">accounts.zoho.com</a> → <strong>Security → App Passwords → Generate New Password</strong>. Name it <code>hr-dashboard</code> → <strong>Generate</strong>.</li>
+    <li>Copy the string it shows and paste it into <code>MAIL_PASSWORD</code> <strong>without spaces</strong>. It is shown once.</li>
+  </ol>
+
+  <h3><span class="step">2.1</span>Confirm the SMTP host</h3>
+  <p>In Zoho Mail → <strong>Settings → Mail Accounts →</strong> click the address → the <strong>IMAP/SMTP</strong> (Outgoing Server) section shows the exact host for your account. It must match the region your Zoho account is hosted in:</p>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Account region</th><th><code>MAIL_HOST</code></th></tr></thead>
+      <tbody>
+        <tr><td class="col-key">US / global</td><td><code>smtp.zoho.com</code></td></tr>
+        <tr><td class="col-key">India</td><td><code>smtp.zoho.in</code></td></tr>
+        <tr><td class="col-key">Europe</td><td><code>smtp.zoho.eu</code></td></tr>
+        <tr><td class="col-key">Australia</td><td><code>smtp.zoho.com.au</code></td></tr>
+        <tr><td class="col-key">Paid organisation (Zoho Workplace / Mail paid)</td><td><code>smtppro.zoho.com</code> (regional variants exist)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Use <code>MAIL_PORT=465</code> (implicit TLS). Port 587 also works (STARTTLS) but 465 is the default the code assumes.</p>
+
+  <div class="warn">
+    <p><span class="lede">Wrong region = silent failure.</span> Pointing <code>MAIL_HOST</code> at <code>smtp.zoho.com</code> when the mailbox lives on <code>smtp.zoho.in</code> fails with <code>E-MAIL-AUTH</code> or hangs as <code>E-MAIL-NETWORK</code>. Check the SMTP section in Settings rather than guessing.</p>
+  </div>
+
+  <div class="warn">
+    <p><span class="lede">Check the plan allows SMTP.</span> Zoho's Forever-Free plan restricts IMAP/SMTP access on some tiers, and every plan has a daily sending limit (roughly 250/day for a new account, more once the account is established and on a paid plan). Confirm SMTP is enabled and note the limit — you set <code>send_daily_cap</code> under it in Phase 4.</p>
+  </div>
+
+  <div class="note">
+    <p>An app password grants full access to that mailbox over SMTP and IMAP — send <em>and</em> read. It is revocable in one click from the same App Passwords page, it is named so its owner can see what it belongs to, and every send it makes lands in that mailbox's Sent folder — a free second audit trail. Because your company owns the domain, Zoho keeps <code>MAIL_FROM</code> exactly as you set it.</p>
+  </div>
+
+  <h3><span class="step">2.2</span>Groq key</h3>
+  <p><a href="https://console.groq.com/keys">console.groq.com/keys</a> → sign in → <strong>Create API Key</strong>. Free tier, no card.</p>
+
+  <div class="phase break">
+    <span class="phase-n">PHASE 3</span>
+    <h2>Run it locally first</h2>
+    <span class="clock">10 min</span>
+  </div>
+  <p class="phase-intro">Do this before deploying. Debugging on your own machine is far faster than debugging through build logs.</p>
+
+<pre><code>npm install                 <span class="cmt"># root: the sheet setup scripts</span>
+cd dashboard &amp;&amp; npm install <span class="cmt"># the web app itself</span></code></pre>
+
+  <p>Two <code>package.json</code> files, two installs — the dashboard deploys from <code>dashboard/</code> alone and cannot reach outside that folder, so it carries its own dependencies.</p>
+
+  <h3><span class="step">3.1</span>The env file</h3>
+<pre><code>cp .env.zoho.example .env.local   <span class="cmt"># you are in dashboard/</span></code></pre>
+
+  <div class="warn">
+    <p><span class="lede">Edit <code>.env.local</code>, never <code>.env.zoho.example</code>.</span> The template is tracked by git; the <code>.local</code> file is ignored. Values typed into the template are one <code>git commit -a</code> away from being published, and a leaked service-account key must then be revoked and reissued. Nothing reads <code>.env.zoho.example</code> at runtime, so the symptom is a confusing "SHEET_ID is not set" on a file that visibly has one.</p>
+  </div>
+
+<pre><code>SHEET_ID=1a2B3cD4eF5gH6iJ7kL8mN9oP
+GOOGLE_SERVICE_ACCOUNT_JSON='{"type":"service_account","project_id":...}'
+
+DASHBOARD_PASSWORD=shared-with-the-hr-team
+SESSION_SECRET=<span class="cmt">&lt;output of: openssl rand -hex 32&gt;</span>
+
+GROQ_API_KEY=gsk_...
+
+MAIL_USER=hiring@yourcompany.com
+MAIL_PASSWORD=                <span class="cmt"># ← LEAVE BLANK for now, on purpose</span>
+MAIL_FROM=3Space Hiring &lt;hiring@yourcompany.com&gt;
+MAIL_HOST=smtp.zoho.in        <span class="cmt"># ← the host you confirmed in step 2.1</span>
+MAIL_PORT=465</code></pre>
+
+  <ul>
+    <li><code>GOOGLE_SERVICE_ACCOUNT_JSON</code> — flatten the downloaded JSON to <strong>one line</strong> and wrap it in <strong>single</strong> quotes, because the JSON itself is full of double quotes.</li>
+    <li><code>SESSION_SECRET</code> — signs the login cookie. Any 64 random hex characters; it only has to be unguessable.</li>
+    <li><code>MAIL_PASSWORD</code> — <strong>leave blank deliberately.</strong> The app refuses to send without it, which is what you want while still clicking around.</li>
+    <li><code>MAIL_HOST</code> / <code>MAIL_PORT</code> — <strong>required for Zoho.</strong> Unset, they default to <code>smtp.gmail.com:465</code> and every send fails. Set the host to the regional value from step 2.1.</li>
+  </ul>
+
+  <h3><span class="step">3.2</span>Build the tabs</h3>
+<pre><code>cd .. &amp;&amp; npm run bootstrap:sheets</code></pre>
+  <p>Creates all four tabs with the right headers and seeds the Config defaults. <strong>Idempotent</strong> — safe to re-run any time; it repairs rather than duplicates, and it is the fix for <code>E-SHEET-SCHEMA</code>.</p>
+<pre><code>  • tab "Applicants" created
+  • tab "Templates" created
+  • tab "EmailLog" created
+  • tab "Config" created
+  • "Applicants" headers written (15 columns)
+  • Config key "dry_run" added (= true)
+  ...
+✔ Done.</code></pre>
+  <p>Optional, and worth it the first time:</p>
+<pre><code>npm run seed:demo   <span class="cmt"># one working template + 3 fake candidates</span></code></pre>
+
+  <h3><span class="step">3.3</span>Start it</h3>
+<pre><code>cd dashboard &amp;&amp; npm run dev   <span class="cmt"># http://localhost:3000</span></code></pre>
+  <p>Log in with <code>DASHBOARD_PASSWORD</code>. You should see the <strong>Inbox</strong> with the seeded candidates.</p>
+
+  <div class="note">
+    <p>With <code>SHEET_ID</code> left blank the app runs on a built-in sample dataset instead — fully clickable, nothing saved, nothing sent. Useful for a look around before committing to any Google setup.</p>
+  </div>
+
+  <div class="phase break">
+    <span class="phase-n">PHASE 4</span>
+    <h2>The sheet's shape</h2>
+  </div>
+  <p class="phase-intro">You type into five columns. Everything to the right of <code>stage</code> is written by the app — leave those cells empty.</p>
+
+  <h4>Applicants</h4>
+  <div class="tw">
+    <table>
+      <thead><tr><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>applicant_id</code></td><td><code>name</code></td><td><code>email</code></td>
+          <td><code>job_role</code></td><td><code>category</code></td><td><code>notes</code></td>
+        </tr>
+        <tr>
+          <td>APP-1001</td><td>Priya Shah</td><td>priya@…</td>
+          <td>Frontend Intern</td><td>Intern</td><td>met at the PDEU fair, strong React</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Then <code>stage</code> in column G, and eight app-written columns after it.</p>
+
+  <ul>
+    <li><strong><code>applicant_id</code> must be unique.</strong> Every action resolves a row by it, and a lookup returns the <em>first</em> match — so a duplicate id means acting on the second row silently acts on the first. The Inbox flags these with a banner naming the sheet rows, and preflight fails on them. Any format works: <code>APP-1001</code>, <code>1</code>, <code>priya-shah</code>.</li>
+    <li><strong><code>notes</code> is the highest-leverage column.</strong> Free text handed to the model as context. "Met at PDEU fair, strong on React, weak on backend" produces a specific email; an empty cell produces a generic one.</li>
+  </ul>
+
+  <h4>Templates</h4>
+  <p>Fill <code>subject</code> and <code>html</code> with merge fields — <code>{{name}}</code>, <code>{{job_role}}</code>, <code>{{company_name}}</code>, <code>{{hr_signature}}</code>. Set <code>is_active</code> to <code>TRUE</code> for a template to be usable, and <code>is_default</code> to <code>TRUE</code> on exactly one.</p>
+  <p>Merge fields are <strong>fail-closed</strong>: an unresolved <code>{{field}}</code> blocks the send rather than mailing someone the literal text.</p>
+
+  <h4>Config</h4>
+  <p>Key/value settings, edited on the app's <strong>Settings</strong> page rather than by hand.</p>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Key</th><th>Ship as</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td class="col-key"><code>dry_run</code></td><td><code>true</code></td><td>Log sends instead of delivering</td></tr>
+        <tr><td class="col-key"><code>toggle_send</code></td><td><code>false</code></td><td>Master switch for sending</td></tr>
+        <tr><td class="col-key"><code>send_daily_cap</code></td><td>under your Zoho plan's limit</td><td>Self-imposed ceiling. Set it below the daily send limit for your Zoho plan (check Zoho Mail Admin → Mail limits)</td></tr>
+        <tr><td class="col-key"><code>company_email</code></td><td>your address</td><td>Becomes the <code>Reply-To</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="phase break">
+    <span class="phase-n">PHASE 5</span>
+    <h2>Deploy to Render</h2>
+    <span class="clock">10 min</span>
+  </div>
+
+  <h3><span class="step">5.1</span>Push</h3>
+<pre><code>git push origin main</code></pre>
+  <p>The blueprint tracks <code>main</code> (<code>render.yaml</code>, <code>branch: main</code>). If the code currently lives on another branch, merge it to <code>main</code> first or change the branch in the Render service settings. No source change is needed for Zoho — only the environment variables in step 5.3 differ.</p>
+
+  <h3><span class="step">5.2</span>Blueprint</h3>
+  <p><a href="https://dashboard.render.com">dashboard.render.com</a> → <strong>New → Blueprint</strong> → connect GitHub → pick the repo.</p>
+  <p>Render reads <code>render.yaml</code>, creates one web service, and prompts for each secret. That file already sets the build command, the start command, Node 22, and a health check on <code>/login</code> — not <code>/</code>, which redirects when signed out and would read as a 307 failure.</p>
+
+  <h3><span class="step">5.3</span>Fill in the secrets</h3>
+  <p>Same values as <code>.env.local</code>, except paste the service-account JSON raw (no quotes).</p>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Variable</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td class="col-key"><code>DASHBOARD_PASSWORD</code></td><td>same</td></tr>
+        <tr><td class="col-key"><code>SESSION_SECRET</code></td><td>same</td></tr>
+        <tr><td class="col-key"><code>SHEET_ID</code></td><td>same</td></tr>
+        <tr><td class="col-key"><code>GOOGLE_SERVICE_ACCOUNT_JSON</code></td><td><strong>Paste the raw JSON — no quotes, no escaping.</strong> Render's value box is not a shell, so the single quotes needed locally would be read as part of the JSON and break it.</td></tr>
+        <tr><td class="col-key"><code>GROQ_API_KEY</code></td><td>same</td></tr>
+        <tr><td class="col-key"><code>MAIL_USER</code></td><td>the full Zoho sending address</td></tr>
+        <tr><td class="col-key"><code>MAIL_PASSWORD</code></td><td><strong>now</strong> paste the Zoho app password, no spaces</td></tr>
+        <tr><td class="col-key"><code>MAIL_FROM</code></td><td>display name and address</td></tr>
+        <tr><td class="col-key"><code>MAIL_HOST</code></td><td>the regional host from step 2.1, e.g. <code>smtp.zoho.in</code></td></tr>
+        <tr><td class="col-key"><code>MAIL_PORT</code></td><td><code>465</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><code>render.yaml</code> already lists <code>MAIL_HOST</code> and <code>MAIL_PORT</code> as promptable secrets, so the Blueprint will ask for them. Leave only <code>GROQ_MODEL</code> blank — it defaults to <code>llama-3.1-8b-instant</code>. First build takes about four minutes.</p>
+
+  <div class="note">
+    <p>The free plan sleeps after 15 minutes idle, so the first request after a quiet spell takes ~30 seconds. Fine for an internal tool.</p>
+  </div>
+
+  <div class="phase break">
+    <span class="phase-n">PHASE 6</span>
+    <h2>Verify, then go live</h2>
+  </div>
+  <p class="phase-intro">Do not reorder this. Every step is a chance to catch a problem while it is still harmless.</p>
+
+  <h3><span class="step">6.1</span>Preflight</h3>
+  <p>Open the deployed URL → log in → <strong>Console</strong> → <strong>Run preflight</strong>. Every check must pass: sheet reachable, headers matching the schema, Groq responding, no duplicate ids, no malformed addresses, and the mailbox actually logging in.</p>
+  <p>That last one opens a real SMTP connection and authenticates — the difference between "a password is set" and "that password works".</p>
+  <p>If it fails there, it is one of four things, in order of likelihood:</p>
+  <ol>
+    <li>The app password was pasted <strong>with spaces</strong> in it</li>
+    <li>The <strong>normal Zoho account password</strong> was pasted instead of the app password</li>
+    <li><code>MAIL_HOST</code> is the wrong region (<code>smtp.zoho.com</code> vs <code>smtp.zoho.in</code>) or is still unset and defaulting to Gmail</li>
+    <li>Multi-factor auth is not actually on, or the plan does not permit SMTP</li>
+  </ol>
+
+  <h3><span class="step">6.2</span>Rehearse with dry run still on</h3>
+  <ol>
+    <li>Add yourself as a candidate in the Inbox.</li>
+    <li>Draft → Approve → Send.</li>
+    <li>Nothing is delivered; a row appears in the Email Log marked <em>dry run</em>.</li>
+  </ol>
+  <p>This proves the whole pipeline — sheet read, template match, merge fields, write-back — with sending physically impossible.</p>
+
+  <h3><span class="step">6.3</span>Go live</h3>
+  <ol>
+    <li>Settings → <strong>Sending</strong> → on</li>
+    <li>Settings → <strong>dry run</strong> → off</li>
+    <li><strong>Run preflight again.</strong> The mailbox check is now a hard failure rather than optional.</li>
+    <li>Send one real email <strong>to yourself</strong>.</li>
+  </ol>
+  <p>If it arrives, you are done. Every other send takes the identical code path.</p>
+
+  <div class="phase break">
+    <span class="phase-n">REFERENCE</span>
+    <h2>What protects you once it is live</h2>
+  </div>
+
+  <ul>
+    <li><strong>Sending is off by default, twice over</strong> — <code>dry_run</code> on <em>and</em> <code>toggle_send</code> off. Both are deliberate flips.</li>
+    <li><strong>Missing credentials refuse the send</strong> with <code>E-CONFIG-MISSING</code> before anything is written. It never logs a send that did not happen.</li>
+    <li><strong>A failed send leaves the row <code>APPROVED</code></strong>, not <code>SENT</code>, with the error code in the row. Retry is safe; a candidate cannot be silently lost.</li>
+    <li><strong>Unresolved merge fields block the send</strong> rather than mailing <code>{{name}}</code>.</li>
+    <li><strong>Every send lands in the Zoho Sent folder</strong> — a second audit trail, free from using a real mailbox, and the place to check before retrying anything ambiguous.</li>
+  </ul>
+
+  <h4>When something breaks</h4>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Code</th><th>Meaning</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr><td><code>E-SHEET-PERM</code></td><td>Robot cannot see the sheet</td><td>Share it with <code>client_email</code> as Editor</td></tr>
+        <tr><td><code>E-SHEET-SCHEMA</code></td><td>Columns drifted</td><td><code>npm run bootstrap:sheets</code></td></tr>
+        <tr><td><code>E-CONFIG-MISSING</code></td><td>Dry run off, no mail credentials</td><td>Set <code>MAIL_PASSWORD</code> in the environment</td></tr>
+        <tr><td><code>E-MAIL-AUTH</code></td><td>Login rejected</td><td>Zoho app password (not the account password), no spaces, MFA on, right regional <code>MAIL_HOST</code></td></tr>
+        <tr><td><code>E-MAIL-429</code></td><td>Zoho throttling</td><td>Daily send limit for the plan; resumes on its own. Lower <code>send_daily_cap</code></td></tr>
+        <tr><td><code>E-MAIL-REJECTED</code></td><td>Dead address</td><td>Fix it in the candidate's Email box</td></tr>
+        <tr><td><code>E-MAIL-NETWORK</code></td><td>Cannot reach the server</td><td>Check <code>MAIL_HOST</code> region. 465 needs implicit TLS, 587 needs STARTTLS — a mismatch hangs rather than erroring</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>Broken logo in a received email</h4>
+  <p>Not a fault. Mail clients fetch images through their own proxy servers, so a <code>localhost</code> URL is unreachable to them and the <code>alt</code> text shows instead. Sends from a local machine always look like this. Deployed, <code>RENDER_EXTERNAL_URL</code> resolves it automatically and no configuration is needed. To preview locally, point <code>COMPANY_LOGO_BASE_URL</code> at the deployed URL — not the <code>company_logo_url</code> setting, which lives in the shared sheet and would follow you into production.</p>
+
+  <h4>Rotating a secret</h4>
+  <p>Same for all of them: revoke at the source, generate a new one, update the environment variable, redeploy. Zoho app password → delete at <a href="https://accounts.zoho.com">accounts.zoho.com → Security → App Passwords</a>. Service account key → delete under <strong>Keys</strong>. Never edit a secret by committing it.</p>
+
+  <div class="phase break">
+    <span class="phase-n">APPENDIX</span>
+    <h2>Deploying for someone else</h2>
+  </div>
+  <p class="phase-intro">Only two credentials genuinely require the client's account. The rest you own and reuse across every deployment.</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Credential</th><th>Their account?</th><th>Who</th></tr></thead>
+      <tbody>
+        <tr><td class="col-key"><code>MAIL_PASSWORD</code> (Zoho app password) + <code>MAIL_HOST</code> region</td><td>Yes — unavoidable</td><td>them</td></tr>
+        <tr><td class="col-key"><code>SHEET_ID</code> + sheet shared</td><td>Yes — one click</td><td>them</td></tr>
+        <tr><td class="col-key"><code>GOOGLE_SERVICE_ACCOUNT_JSON</code></td><td>No</td><td>you</td></tr>
+        <tr><td class="col-key"><code>GROQ_API_KEY</code></td><td>No</td><td>you</td></tr>
+        <tr><td class="col-key"><code>DASHBOARD_PASSWORD</code></td><td>No</td><td>you</td></tr>
+        <tr><td class="col-key"><code>SESSION_SECRET</code></td><td>No</td><td>you</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>The service account is the non-obvious one: it does not have to live in their Google account. It is a robot address that needs Editor access to their sheet, so you create it once under your own project and they only ever share a spreadsheet with it. That removes an entire Cloud Console walkthrough from the session, leaving about eight minutes of their time.</p>
+
+  <p>Have them create the spreadsheet <strong>in their own Drive</strong>. If it sits in yours, their hiring history leaves with you.</p>
+
+  <div class="warn">
+    <p><span class="lede">Never let an app password travel through chat.</span> Have the deployment environment open and type it straight into the variable while you are with them. If it must be transported, use a password manager's one-time link — never messaging or plain email. And strip the spaces while they can still re-read it: it is shown once, and a wrong paste means booking them again.</p>
+  </div>
+
+  <h4>Collection sheet</h4>
+  <div class="fill">
+    <span class="grp">Client / date</span>
+    <span class="lbl">CLIENT</span><span class="rule-line"></span><br>
+    <span class="lbl">DATE</span><span class="rule-line"></span>
+
+    <span class="grp">From them</span>
+    <span class="lbl">MAIL_USER (full Zoho address)</span><span class="rule-line"></span><br>
+    <span class="lbl">MAIL_PASSWORD (Zoho app password, no spaces)</span><span class="rule-line"></span><br>
+    <span class="lbl">MAIL_HOST (region, e.g. smtp.zoho.in)</span><span class="rule-line"></span><br>
+    <span class="lbl">□ MFA on &nbsp; □ plan allows SMTP</span><br>
+    <span class="lbl">SHEET_ID</span><span class="rule-line"></span><br>
+    <span class="lbl">□ shared with robot as EDITOR</span><br>
+    <span class="lbl">MAIL_FROM (display name)</span><span class="rule-line"></span><br>
+    <span class="lbl">company_email (Reply-To)</span><span class="rule-line"></span>
+
+    <span class="grp">Already yours</span>
+    <span class="lbl">□ GOOGLE_SERVICE_ACCOUNT_JSON</span><br>
+    <span class="lbl">□ GROQ_API_KEY</span><br>
+    <span class="lbl">□ DASHBOARD_PASSWORD</span><br>
+    <span class="lbl">□ SESSION_SECRET</span>
+  </div>
+
+  <h4>Check the password before they walk away</h4>
+  <p>Ten seconds, sends nothing, and tests the one credential you cannot regenerate without them. Use their regional host.</p>
+<pre><code>cd dashboard
+MAIL_USER=hiring@theircompany.com MAIL_PASSWORD=their-zoho-app-password \
+node -e "require('nodemailer').createTransport({host:'smtp.zoho.in',
+port:465,secure:true,auth:{user:process.env.MAIL_USER,
+pass:process.env.MAIL_PASSWORD}}).verify().then(()=>console.log('works'))
+.catch(e=>console.log('FAILED',e.message))"</code></pre>
+  <p>A <code>535</code> auth error means the app password is wrong, has spaces, or the host is the wrong region — sort it while they are still in the room.</p>
+
+  <div class="end">
+    3Space · Hiring Automation — Deployment Manual<br>
+    Full error-code reference and architecture notes live in the repository README.
+  </div>
+
+</div>
