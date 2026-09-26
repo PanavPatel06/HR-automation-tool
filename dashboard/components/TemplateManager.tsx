@@ -7,6 +7,29 @@ import { shortDate } from '../lib/format';
 
 const AI_FIELD = '{{ai_body}}';
 
+function escapePreviewValue(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** Render known branding fields so the template preview matches a real email. */
+function renderPreviewHtml(source: string, config: Record<string, unknown>): string {
+  const logoUrl = String(config.company_logo_url ?? '').trim()
+    || `${window.location.origin}/brand/logo.png`;
+  const values: Record<string, unknown> = { ...config, company_logo_url: logoUrl };
+  const trustedHtml = new Set(['hr_signature', 'company_phone', 'company_incubator']);
+
+  return String(source || '').replace(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g, (match, field: string) => {
+    const value = values[field];
+    if (value === undefined || value === null || String(value).trim() === '') return match;
+    return trustedHtml.has(field) ? String(value) : escapePreviewValue(value);
+  });
+}
+
 /**
  * Templates are where HR keeps control of tone. Two things are made obvious
  * here because they are the two things that surprise people:
@@ -14,7 +37,7 @@ const AI_FIELD = '{{ai_body}}';
  *     costs nothing;
  *   - AI-generated templates arrive inactive and must be read before use.
  */
-export function TemplateManager({ templates, roles }: { templates: Row[]; roles: string[] }) {
+export function TemplateManager({ templates, roles, config }: { templates: Row[]; roles: string[]; config: Record<string, unknown> }) {
   const { run, busy, result, clear } = useAction();
   const [preview, setPreview] = useState<Row | null>(null);
   const [brief, setBrief] = useState({ purpose: 'initial outreach to a job applicant', tone: 'warm, professional, concise', job_role: '', notes: '' });
@@ -160,7 +183,7 @@ export function TemplateManager({ templates, roles }: { templates: Row[]; roles:
             {busy === 'set-template-attachment' ? 'Saving…' : 'Save attachment'}
           </button>
 
-          <div className="preview" dangerouslySetInnerHTML={{ __html: preview.html }} />
+          <div className="preview" dangerouslySetInnerHTML={{ __html: renderPreviewHtml(preview.html, config) }} />
           <details className="hint-details" style={{ marginTop: 10 }}>
             <summary>Raw HTML</summary>
             <textarea readOnly rows={12} value={preview.html} style={{ marginTop: 8 }} />
