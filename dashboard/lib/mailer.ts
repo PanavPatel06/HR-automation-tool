@@ -177,7 +177,13 @@ function normalizeMessage(raw: Record<string, unknown>): ZohoMessageSummary {
   };
 }
 
-/** Metadata is fetched on candidate selection; message bodies are fetched only when a thread is opened. */
+/**
+ * Metadata is fetched on candidate selection; message bodies are fetched only
+ * when a thread is opened. Use the documented folder-list endpoint here,
+ * which is also exercised by preflight. The search endpoint can reject a
+ * syntactically valid sender/to OR search as "Invalid Input" for some Mail
+ * accounts, making inbox reads fail while preflight succeeds.
+ */
 export async function listCandidateMessages(email: string): Promise<ZohoMessageSummary[]> {
   const normalizedEmail = email.trim().toLowerCase();
   if (!normalizedEmail) return [];
@@ -186,11 +192,19 @@ export async function listCandidateMessages(email: string): Promise<ZohoMessageS
   const maxMessages = 2000;
 
   for (let start = 1; start <= maxMessages; start += pageSize) {
-    const searchKey = `sender:${normalizedEmail}::or:to:${normalizedEmail}`;
-    const query = new URLSearchParams({ searchKey, receivedTime: String(Date.now()), start: String(start), limit: String(pageSize), includeto: 'true' });
-    const payload = await zohoRequest<ZohoEnvelope<Record<string, unknown>[]>>(`/messages/search?${query}`);
+    const query = new URLSearchParams({
+      folderId: config().folderId,
+      start: String(start),
+      limit: String(pageSize),
+      includeto: 'true',
+      includesent: 'true',
+    });
+    const payload = await zohoRequest<ZohoEnvelope<Record<string, unknown>[]>>(`/messages/view?${query}`);
     const rows = arrayData(payload, 'listing candidate messages').map(normalizeMessage);
-    results.push(...rows);
+    results.push(...rows.filter((message) =>
+      message.fromAddress.toLowerCase().includes(normalizedEmail)
+      || message.toAddress.toLowerCase().includes(normalizedEmail),
+    ));
     if (rows.length < pageSize) break;
   }
 

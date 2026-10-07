@@ -495,7 +495,7 @@ export async function POST(req: Request) {
     // --- Preflight: check every credential without writing or sending -------
     if (action === 'preflight') {
       const checks: Array<{ check: string; ok: boolean; detail: string; fix: string }> = [];
-      const warnOnly = new Set(['dry_run is ON', 'Zoho Mail API works (optional)', 'No repeated email address', 'Email addresses look valid']);
+      const warnOnly = new Set(['Zoho Mail API works (optional)', 'No repeated email address', 'Email addresses look valid']);
       const add = (check: string, ok: boolean, detail = '', fix = '') => checks.push({ check, ok, detail, fix: ok ? '' : fix });
       // Whether a missing mailer is a warning or a failure depends on dry run,
       // which is read further down. Recorded here, judged at the end.
@@ -517,7 +517,12 @@ export async function POST(req: Request) {
           add('Config keys are present', missingKeys.length === 0, missingKeys.length ? `missing: ${missingKeys.join(', ')}` : 'ok', 'Run `npm run bootstrap:sheets` — it adds missing keys without touching existing values.');
           const config = parseConfig(rows);
           liveSending = config.dry_run === false;
-          add('dry_run is ON', config.dry_run === true, config.dry_run === true ? 'no real emails will be sent' : 'REAL EMAILS WILL BE SENT', 'This is only a warning. Turn it off in Settings when ready to send for real.');
+          add(
+            config.dry_run === false ? 'Sending mode: live' : 'Sending mode: dry run',
+            true,
+            config.dry_run === false ? 'dry_run is OFF — approved sends will reach real recipients' : 'dry_run is ON — no real emails will be sent',
+            '',
+          );
         } catch (err) {
           const e = err as SheetsError;
           add('Google Sheets credential works', false, `${e.code}: ${e.message}`, e.hint);
