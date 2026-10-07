@@ -8,6 +8,7 @@ import { selectForDrafting, usesAi, buildDraftPrompt, checkDraftSchema, assemble
 import { sendMail, sendReply, fetchUrlAttachment, isMailerConfigured, mailFrom, mailHost, verifyMailer, MailerError, MAX_ATTACHMENTS_BYTES, type OutgoingAttachment } from '../../../lib/mailer';
 import { ACTIONABLE } from '../../../lib/contract';
 import { findDuplicates, describeDuplicates } from '../../../lib/duplicates';
+import { normalizeEmailAddress } from '../../../lib/email-address';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -49,7 +50,8 @@ function requireMailerWhenLive(dryRun: boolean) {
 
 /** Candidates hit Reply on the email; their answer must reach a human, not this app. */
 function replyToAddress(config: Record<string, unknown>): string | undefined {
-  return String(config.company_email ?? '').trim() || undefined;
+  const value = String(config.company_email ?? '').trim();
+  return (normalizeEmailAddress(value) ?? value) || undefined;
 }
 
 export async function POST(req: Request) {

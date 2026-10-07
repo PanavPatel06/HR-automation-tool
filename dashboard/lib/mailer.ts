@@ -1,4 +1,5 @@
 import 'server-only';
+import { normalizeEmailAddress } from './email-address';
 
 /** Zoho Mail API client. All OAuth credentials stay in this server-only module. */
 
@@ -47,13 +48,22 @@ function requiredEnv(key: string): string {
 }
 
 function config() {
+  const configuredFrom = requiredEnv('ZOHO_FROM_ADDRESS');
+  const from = normalizeEmailAddress(configuredFrom);
+  if (!from) {
+    throw new MailerError(
+      'E-ZOHO-SENDER',
+      'ZOHO_FROM_ADDRESS is not a valid email address.',
+      'Set it to the authorized mailbox address, for example careers@example.com. A display name may be included in Render; the app will extract the address.',
+    );
+  }
   return {
     clientId: requiredEnv('ZOHO_CLIENT_ID'),
     clientSecret: requiredEnv('ZOHO_CLIENT_SECRET'),
     refreshToken: requiredEnv('ZOHO_REFRESH_TOKEN'),
     accountId: requiredEnv('ZOHO_ACCOUNT_ID'),
     folderId: requiredEnv('ZOHO_FOLDER_ID'),
-    from: requiredEnv('ZOHO_FROM_ADDRESS'),
+    from,
   };
 }
 
@@ -63,7 +73,8 @@ export function isMailerConfigured(): boolean {
 }
 
 export function mailFrom(): string {
-  return String(process.env.ZOHO_FROM_ADDRESS ?? '').trim();
+  const value = String(process.env.ZOHO_FROM_ADDRESS ?? '').trim();
+  return normalizeEmailAddress(value) ?? value;
 }
 
 export function mailHost(): string {
@@ -144,11 +155,18 @@ async function zohoRequest<T>(path: string, init: RequestInit = {}, retry = true
   const payload = await response.json().catch(() => ({})) as ZohoEnvelope<T>;
   const apiCode = Number(payload.status?.code);
   if (!response.ok || (Number.isFinite(apiCode) && apiCode >= 400)) {
+    const moreInfo = (payload.data as { moreInfo?: unknown } | undefined)?.moreInfo;
     const reason = payload.status?.description || payload.message || payload.error || `HTTP ${response.status}`;
+    const details = [reason, typeof moreInfo === 'string' ? moreInfo : ''].filter(Boolean).join(' — ');
     const code = response.status === 429 ? 'E-ZOHO-429' : response.status === 401 ? 'E-ZOHO-AUTH' : 'E-ZOHO-API';
-    throw new MailerError(code, `Zoho Mail API request failed: ${reason}`, code === 'E-ZOHO-AUTH'
+    const method = (init.method ?? 'GET').toUpperCase();
+    const endpoint = path.split('?')[0];
+    const hint = code === 'E-ZOHO-AUTH'
       ? 'Check that the Zoho refresh token has the required scopes and that the client credentials match.'
-      : 'Check the Zoho account/folder IDs and the API response in the server logs.');
+      : method === 'POST' && (endpoint === '/messages' || /^\/messages\/\d+$/.test(endpoint))
+        ? 'Zoho requires fromAddress to be the authorized mailbox email (not a display-name string), and any reply-to address must also be a valid email. Check the provider detail above.'
+        : 'Check the provider detail above, then confirm the account/folder IDs and the documented endpoint parameters.';
+    throw new MailerError(code, `Zoho ${method} ${endpoint} failed: ${details}`, hint);
   }
   return payload as T;
 }
