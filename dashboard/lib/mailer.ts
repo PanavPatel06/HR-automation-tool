@@ -279,7 +279,7 @@ async function uploadAttachment(attachment: OutgoingAttachment): Promise<ZohoAtt
 }
 
 export async function sendMail(args: {
-  to: string; subject: string; html: string; replyTo?: string; attachments?: OutgoingAttachment[];
+  to: string; subject: string; html: string; attachments?: OutgoingAttachment[];
 }): Promise<{ id: string }> {
   const attachments = args.attachments ?? [];
   const totalSize = attachments.reduce((n, a) => n + Buffer.from(a.base64, 'base64').length, 0);
@@ -295,7 +295,6 @@ export async function sendMail(args: {
       content: args.html,
       mailFormat: 'html',
       encoding: 'UTF-8',
-      ...(args.replyTo ? { replyToAddress: args.replyTo } : {}),
       ...(uploaded.length ? { attachments: uploaded } : {}),
     }),
   });
@@ -305,7 +304,7 @@ export async function sendMail(args: {
 }
 
 export async function sendReply(args: {
-  messageId: string; to: string; subject: string; html: string; replyTo?: string;
+  messageId: string; to: string; subject: string; html: string;
 }): Promise<{ id: string }> {
   if (!/^\d+$/.test(args.messageId)) throw new MailerError('E-ZOHO-THREAD', 'Invalid reply message ID.', 'Refresh the thread and try again.');
   const payload = await zohoRequest<ZohoEnvelope<{ messageId?: string; mailId?: string }>>(
@@ -320,7 +319,6 @@ export async function sendReply(args: {
         mailFormat: 'html',
         encoding: 'UTF-8',
         action: 'reply',
-        ...(args.replyTo ? { replyToAddress: args.replyTo } : {}),
       }),
     },
   );

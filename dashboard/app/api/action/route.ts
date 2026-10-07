@@ -8,7 +8,6 @@ import { selectForDrafting, usesAi, buildDraftPrompt, checkDraftSchema, assemble
 import { sendMail, sendReply, fetchUrlAttachment, isMailerConfigured, mailFrom, mailHost, verifyMailer, MailerError, MAX_ATTACHMENTS_BYTES, type OutgoingAttachment } from '../../../lib/mailer';
 import { ACTIONABLE } from '../../../lib/contract';
 import { findDuplicates, describeDuplicates } from '../../../lib/duplicates';
-import { normalizeEmailAddress } from '../../../lib/email-address';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -46,12 +45,6 @@ function requireMailerWhenLive(dryRun: boolean) {
   return fail(503, 'E-CONFIG-MISSING',
     'Dry run is off, but email sending is not configured — nothing was sent.',
     'Set the Zoho OAuth credentials and account/folder details in the deployment environment, or turn dry run back on in Settings. Nothing is logged as sent while this is broken.');
-}
-
-/** Candidates hit Reply on the email; their answer must reach a human, not this app. */
-function replyToAddress(config: Record<string, unknown>): string | undefined {
-  const value = String(config.company_email ?? '').trim();
-  return (normalizeEmailAddress(value) ?? value) || undefined;
 }
 
 export async function POST(req: Request) {
@@ -299,8 +292,8 @@ export async function POST(req: Request) {
       if (willSendForReal) {
         const replyMessageId = String(body.reply_message_id ?? '').trim();
         const sent = replyMessageId && attachments.length === 0
-          ? await sendReply({ messageId: replyMessageId, to: applicant.email, subject, html, replyTo: replyToAddress(config) })
-          : await sendMail({ to: applicant.email, subject, html, attachments, replyTo: replyToAddress(config) });
+          ? await sendReply({ messageId: replyMessageId, to: applicant.email, subject, html })
+          : await sendMail({ to: applicant.email, subject, html, attachments });
         providerMessageId = sent.id;
       }
 
@@ -341,7 +334,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, result: {
         status: 'ok',
         notes: willSendForReal
-          ? `Sent to ${applicant.email}${attachmentNote}. Replies go to ${replyToAddress(config) || mailFrom()}.`
+          ? `Sent to ${applicant.email}${attachmentNote}. Replies follow the Zoho mailbox's configured Reply-To.`
           : `"Sent" to ${applicant.email}${attachmentNote} — logged in the Email Log, not actually delivered. ${isMailerConfigured() ? 'Turn off dry run in Settings to send for real.' : 'Configure the Zoho OAuth credentials to send for real.'}`,
       } });
     }
@@ -416,8 +409,6 @@ export async function POST(req: Request) {
       const misconfigured = requireMailerWhenLive(dryRun);
       if (misconfigured) return misconfigured;
       const cap = Number(config.send_daily_cap) || 100;
-      const replyTo = replyToAddress(config);
-
       const [applicants, emailLog, templates] = await Promise.all([readTab('Applicants'), readTab('EmailLog'), readTab('Templates')]);
       const today = new Date().toISOString().slice(0, 10);
       let budget = Math.max(0, cap - emailLog.filter((r) => r.at.startsWith(today) && r.result === 'sent').length);
@@ -463,7 +454,7 @@ export async function POST(req: Request) {
           try {
             const templateAttachment = await attachmentFor(a.template_id);
             const sent = await sendMail({
-              to: a.email, subject: a.email_subject, html: a.email_html, replyTo,
+              to: a.email, subject: a.email_subject, html: a.email_html,
               attachments: templateAttachment ? [templateAttachment] : undefined,
             });
             providerMessageId = sent.id;
