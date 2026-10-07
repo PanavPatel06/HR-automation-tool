@@ -26,7 +26,6 @@ export function selectForDrafting({
   const eligible = (applicants || []).filter((a) => {
     if (!a.applicant_id) return false;
     if (wanted) return wanted.has(a.applicant_id);
-    if (a.status === 'blocked') return false;
     if (redraft) return ['NEW', 'DRAFTED', 'FAILED'].includes(a.stage);
     return a.stage === 'NEW' || (a.stage === 'FAILED' && !a.email_subject);
   });
@@ -42,6 +41,7 @@ export function buildDraftPrompt({
     `Candidate name: ${applicant.name}`,
     `Role applied for: ${applicant.job_role}`,
     applicant.category ? `Seniority/category: ${applicant.category}` : '',
+    applicant.notes ? `What we know about them: ${applicant.notes.slice(0, 500)}` : '',
     `Sender: ${config.hr_name || 'HR'}`,
     '',
     'Write the body of an outreach email to this candidate about their application.',
@@ -102,7 +102,6 @@ export function assembleDraft({
     email_subject: rendered.subject,
     email_html: fitCell(rendered.html),
     stage: 'DRAFTED',
-    status: 'ok',
     error_code: '',
     error_message: '',
     updated_at: now,

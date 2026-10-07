@@ -3,10 +3,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef } from 'react';
 
-// Applicants, Inbox, and Replies used to be three separate pages; they're
-// now one merged view at "/" (components/MailView.tsx) — the pipeline table,
-// the per-candidate thread/compose view, and reply triage (a reply is
-// cleared the moment you respond to it from the thread), all in one place.
+// "/" is the whole app (components/MailView.tsx): the candidate list, the
+// bulk pipeline actions, and the per-candidate composer, in one view.
 const LINKS = [
   { href: '/', label: 'Inbox' },
   { href: '/templates', label: 'Templates' },

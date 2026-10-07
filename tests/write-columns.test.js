@@ -64,7 +64,7 @@ test('every literal column written by the action route exists in the contract', 
 
   for (const { fn, tab, keys } of sites) {
     assert.ok(TABS[tab], `${fn} writes to unknown tab "${tab}"`);
-    const allowed = new Set([...columnsFor(tab, { includeV2: true }), '_row']);
+    const allowed = new Set([...columnsFor(tab), '_row']);
     for (const key of keys) {
       assert.ok(
         allowed.has(key),
@@ -75,16 +75,15 @@ test('every literal column written by the action route exists in the contract', 
   }
 });
 
-test('the reply path writes the columns it needs on every tab it touches', () => {
-  // Guards the ad-hoc Inbox reply specifically: it is the newest write path,
-  // and the one whose failure leaves an email sent with nothing recorded.
+test('the send paths write the columns they need on every tab they touch', () => {
+  // Guards the send paths specifically: they are the ones whose failure
+  // leaves an email delivered with nothing recorded.
   const needed = {
-    Applicants: ['template_id', 'email_subject', 'email_html', 'email_status', 'sent_at', 'thread_id', 'message_id', 'stage', 'updated_at'],
-    EmailLog: ['at', 'correlation_id', 'applicant_id', 'to', 'subject', 'provider', 'result', 'provider_message_id', 'thread_id', 'dry_run'],
-    Replies: ['handled_by', 'handled_at'],
+    Applicants: ['template_id', 'email_subject', 'email_html', 'sent_at', 'stage', 'updated_at'],
+    EmailLog: ['at', 'applicant_id', 'to', 'subject', 'result', 'provider_message_id', 'dry_run', 'error_code', 'error_message'],
   };
   for (const [tab, columns] of Object.entries(needed)) {
-    const actual = columnsFor(tab, { includeV2: true });
+    const actual = columnsFor(tab);
     for (const column of columns) {
       assert.ok(actual.includes(column), `${tab} is missing "${column}", which the reply path writes`);
     }

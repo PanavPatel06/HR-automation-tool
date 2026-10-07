@@ -36,10 +36,17 @@ services:
         sync: false
       - key: GROQ_MODEL
         sync: false
-      # --- Gmail: optional. Blank keeps sending logged-only ---
-      - key: GMAIL_CLIENT_ID
+      # --- Zoho Mail API (India data center) ---
+      # Use the long-lived refresh token, never the two-minute authorization code.
+      - key: ZOHO_CLIENT_ID
         sync: false
-      - key: GMAIL_CLIENT_SECRET
+      - key: ZOHO_CLIENT_SECRET
         sync: false
-      - key: GMAIL_REFRESH_TOKEN
+      - key: ZOHO_REFRESH_TOKEN
+        sync: false
+      - key: ZOHO_ACCOUNT_ID
+        sync: false
+      - key: ZOHO_FOLDER_ID
+        sync: false
+      - key: ZOHO_FROM_ADDRESS
         sync: false

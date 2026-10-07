@@ -231,7 +231,7 @@ export type TemplateRow = Record<string, string>;
  */
 export function selectTemplate(
   templates: TemplateRow[],
-  { job_role, category, stage = 'outreach' }: { job_role?: string; category?: string; stage?: string } = {},
+  { job_role, category }: { job_role?: string; category?: string } = {},
 ): { template: TemplateRow; warning: string | null } {
   const active = (templates || []).filter((t) => truthy(t.is_active));
   if (!active.length) {
@@ -239,10 +239,8 @@ export function selectTemplate(
   }
 
   const eq = (a?: string, b?: string) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
-  const stageMatches = active.filter((t) => !t.stage || eq(t.stage, stage));
-  const pool = stageMatches.length ? stageMatches : active;
 
-  const scored = pool.map((t) => {
+  const scored = active.map((t) => {
     let score = 0;
     if (t.job_role && eq(t.job_role, job_role)) score += 4;
     else if (t.job_role) score -= 10; // wrong role is disqualifying, not neutral
@@ -254,7 +252,7 @@ export function selectTemplate(
 
   const best = scored[0];
   if (!best || best.score < 0) {
-    const fallback = pool.find((t) => truthy(t.is_default));
+    const fallback = active.find((t) => truthy(t.is_default));
     if (!fallback) {
       throw new TemplateError('E-MAIL-TEMPLATE', `No template matches role "${job_role}" and no default template is set.`, 'Set a default template in the dashboard.');
     }

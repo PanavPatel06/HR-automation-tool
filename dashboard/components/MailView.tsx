@@ -1,13 +1,12 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Row } from '../lib/contract';
 import { isTruthy, ACTIONABLE, STAGES } from '../lib/contract';
-import { StagePill, IntentPill, CategoryPill } from './Pills';
+import { StagePill, CategoryPill } from './Pills';
 import { shortDate, timeAgo } from '../lib/format';
+import { findDuplicates, duplicateIds } from '../lib/duplicates';
 import { useAction, ResultBanner } from './useAction';
-// Type-only imports — erased at compile time, so lib/gmail.ts's `server-only`
-// guard never ends up in this client bundle. See useAction.tsx.
-import type { GmailMessage, GmailAttachmentMeta } from '../lib/gmail';
 
 const PLACEHOLDER_RE = /\{\{\s*[a-zA-Z0-9_.]+\s*\}\}/;
 const MAX_ATTACHMENTS_BYTES = 15 * 1024 * 1024;
@@ -16,12 +15,17 @@ type Attachment = { filename: string; mimeType: string; base64: string; size: nu
 type Compose = { templateId: string; subject: string; html: string; instructions: string; attachments: Attachment[] };
 const EMPTY_COMPOSE: Compose = { templateId: '', subject: '', html: '', instructions: '', attachments: [] };
 
-type GroupBy = 'none' | 'stage' | 'role' | 'category' | 'intent';
+type GroupBy = 'none' | 'stage' | 'role' | 'category';
+type MailMessage = {
+  messageId: string; threadId: string; folderId: string; subject: string;
+  fromAddress: string; toAddress: string; summary: string; sentDateInGMT: string;
+  receivedTime: string; status: string; hasAttachment: string; content?: string;
+};
 
-type ThreadItem =
-  | { kind: 'sent'; at: string; subject: string; html: string }
-  | { kind: 'reply'; at: string; from: string; intent: string; snippet: string; handled: boolean }
-  | { kind: 'gmail'; at: string; from: string; to: string; subject: string; html: string; text: string; attachments: GmailAttachmentMeta[]; inbound: boolean };
+function messageDate(value: string): string {
+  const time = Number(value);
+  return Number.isFinite(time) && time > 0 ? new Date(time).toISOString() : value;
+}
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -39,28 +43,36 @@ async function fileToBase64(file: File): Promise<string> {
 }
 
 /**
- * The merged Applicants + Inbox surface: work the pipeline in bulk from the
- * list on the left (draft / approve / send, same rules as before), or open
- * one candidate to see their whole thread and reply — by template, by hand,
- * or with AI — with real Gmail import/send layered in when it's configured
- * (see lib/gmail.ts) and simulated the same way as before when it isn't.
+ * The whole app: the candidate list on the left (from the Applicants tab),
+ * and on the right the message you are about to send them.
  *
- * Two rules carried over unchanged from Inbox:
+ * The composer's centre of gravity is the instructions box. You pick a
+ * candidate, say what the email should cover in plain English, and the model
+ * writes it — their name, role and category come from their sheet row, so you
+ * never type those. A template is optional, either as a starting point or as a
+ * style reference for the model.
+ *
+ * Two rules hold whichever way the message got written:
  *   - AI only ever fills the compose box; a human still has to press Send.
  *   - Sending is blocked while a literal {{field}} is still visible.
+ *
+ * Candidate membership stays in Applicants. Mail and conversation bodies are
+ * fetched live from Zoho and are never written into the spreadsheet.
  */
-export function MailView({ applicants, templates, replies, roles, categories: configCategories, demoMode, gmailConfigured, dryRun, sendEnabled }: {
+export function MailView({ applicants, templates, roles, categories: configCategories, mailerConfigured, dryRun, sendEnabled, loadedAt }: {
   applicants: Row[];
   templates: Row[];
-  replies: Row[];
   roles: string[];
   categories: string[];
-  demoMode: boolean;
-  gmailConfigured: boolean;
+  mailerConfigured: boolean;
   dryRun: boolean;
   sendEnabled: boolean;
+  /** When the server read the sheet for this render. */
+  loadedAt: string;
 }) {
   const { run, busy, result, clear } = useAction();
+  const router = useRouter();
+  const [refreshing, startRefresh] = useTransition();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
@@ -71,13 +83,26 @@ export function MailView({ applicants, templates, replies, roles, categories: co
   const [confirmSend, setConfirmSend] = useState(false);
   const [compose, setCompose] = useState<Compose>(EMPTY_COMPOSE);
   const [attachError, setAttachError] = useState<string | null>(null);
-  const [gmailMessages, setGmailMessages] = useState<GmailMessage[] | null>(null);
   const [categoryDraft, setCategoryDraft] = useState('');
   const [bulkCategory, setBulkCategory] = useState('');
   const [showNewContact, setShowNewContact] = useState(false);
-  const [newContact, setNewContact] = useState({ name: '', email: '', role: '', category: '' });
+  const [newContact, setNewContact] = useState({ name: '', email: '', role: '', category: '', notes: '' });
+  const [emailDraft, setEmailDraft] = useState('');
+  const [mailMessages, setMailMessages] = useState<MailMessage[]>([]);
+  const [mailLoading, setMailLoading] = useState(false);
+  const [mailError, setMailError] = useState('');
+  const [activeThreadId, setActiveThreadId] = useState('');
+  const [threadMessages, setThreadMessages] = useState<MailMessage[]>([]);
+  const [threadLoading, setThreadLoading] = useState(false);
+  const [threadError, setThreadError] = useState('');
 
   const activeTemplates = useMemo(() => templates.filter((t) => isTruthy(t.is_active)), [templates]);
+
+  // Redundancy in the sheet. A repeated applicant_id makes every action target
+  // the first matching row silently, so it is worth surfacing where the rows
+  // actually are — see lib/duplicates.ts.
+  const duplicates = useMemo(() => findDuplicates(applicants), [applicants]);
+  const dupIds = useMemo(() => duplicateIds(duplicates), [duplicates]);
 
   // Categories actually in use, for the filter dropdown — no point offering
   // "Lead" to filter by if nobody has that category. The assignment picker
@@ -93,21 +118,6 @@ export function MailView({ applicants, templates, replies, roles, categories: co
     [configCategories, usedCategories]
   );
 
-  const unhandledByApplicant = useMemo(() => {
-    const s = new Set<string>();
-    for (const r of replies) if (!r.handled_at) s.add(r.applicant_id);
-    return s;
-  }, [replies]);
-
-  const latestReplyByApplicant = useMemo(() => {
-    const map = new Map<string, Row>();
-    for (const r of replies) {
-      const cur = map.get(r.applicant_id);
-      if (!cur || r.received_at > cur.received_at) map.set(r.applicant_id, r);
-    }
-    return map;
-  }, [replies]);
-
   const list = useMemo(() => applicants
     .filter((a) => a.applicant_id)
     .filter((a) => !role || a.job_role === role)
@@ -116,22 +126,17 @@ export function MailView({ applicants, templates, replies, roles, categories: co
     .filter((a) => {
       if (!query) return true;
       const q = query.toLowerCase();
-      return [a.name, a.email, a.applicant_id, a.job_role].some((f) => String(f ?? '').toLowerCase().includes(q));
+      return [a.name, a.email, a.applicant_id, a.job_role, a.notes].some((f) => String(f ?? '').toLowerCase().includes(q));
     })
-    .sort((a, b) => {
-      const aUnread = unhandledByApplicant.has(a.applicant_id) ? 0 : 1;
-      const bUnread = unhandledByApplicant.has(b.applicant_id) ? 0 : 1;
-      if (aUnread !== bUnread) return aUnread - bUnread;
-      return (b.updated_at || b.created_at || '').localeCompare(a.updated_at || a.created_at || '');
-    }), [applicants, role, stage, category, query, unhandledByApplicant]);
+    .sort((a, b) => (b.updated_at || b.created_at || '').localeCompare(a.updated_at || a.created_at || '')),
+    [applicants, role, stage, category, query]);
 
   const groupedList = useMemo(() => {
     if (groupBy === 'none') return [{ key: '', rows: list }];
     const keyOf = (a: Row) => {
       if (groupBy === 'stage') return a.stage || 'NEW';
       if (groupBy === 'role') return a.job_role || 'No role';
-      if (groupBy === 'category') return a.category || 'Uncategorised';
-      return latestReplyByApplicant.get(a.applicant_id)?.classified_intent || 'no reply';
+      return a.category || 'Uncategorised';
     };
     const map = new Map<string, Row[]>();
     for (const a of list) {
@@ -144,27 +149,71 @@ export function MailView({ applicants, templates, replies, roles, categories: co
       ? keys.sort((x, y) => STAGES.indexOf(x as never) - STAGES.indexOf(y as never))
       : keys.sort();
     return keys.map((k) => ({ key: k, rows: map.get(k)! }));
-  }, [list, groupBy, latestReplyByApplicant]);
+  }, [list, groupBy]);
 
   const selected = useMemo(() => applicants.find((a) => a.applicant_id === selectedId) ?? null, [applicants, selectedId]);
-  const threadReplies = useMemo(
-    () => replies.filter((r) => r.applicant_id === selectedId).sort((a, b) => a.received_at.localeCompare(b.received_at)),
-    [replies, selectedId]
-  );
 
-  const threadItems = useMemo((): ThreadItem[] => {
-    if (!selected) return [];
-    const items: ThreadItem[] = [];
-    if (selected.email_html) items.push({ kind: 'sent', at: selected.sent_at || selected.updated_at, subject: selected.email_subject, html: selected.email_html });
-    for (const r of threadReplies) items.push({ kind: 'reply', at: r.received_at, from: r.from, intent: r.classified_intent, snippet: r.snippet, handled: Boolean(r.handled_at) });
-    for (const m of gmailMessages ?? []) {
-      items.push({
-        kind: 'gmail', at: m.date, from: m.from, to: m.to, subject: m.subject, html: m.html, text: m.text,
-        attachments: m.attachments, inbound: selected.email ? m.from.toLowerCase().includes(selected.email.toLowerCase()) : false,
-      });
+  const mailThreads = useMemo(() => {
+    const groups = new Map<string, MailMessage[]>();
+    for (const message of mailMessages) {
+      const id = message.threadId || message.messageId;
+      groups.set(id, [...(groups.get(id) ?? []), message]);
     }
-    return items.sort((a, b) => a.at.localeCompare(b.at));
-  }, [selected, threadReplies, gmailMessages]);
+    return [...groups.entries()].map(([id, messages]) => ({
+      id,
+      messages,
+      latest: messages[messages.length - 1],
+      subject: messages[messages.length - 1]?.subject || '(no subject)',
+    })).sort((a, b) => Number(b.latest?.sentDateInGMT || b.latest?.receivedTime) - Number(a.latest?.sentDateInGMT || a.latest?.receivedTime));
+  }, [mailMessages]);
+
+  async function loadCandidateMessages(applicantId: string) {
+    setMailLoading(true);
+    setMailError('');
+    setMailMessages([]);
+    setActiveThreadId('');
+    setThreadMessages([]);
+    setThreadError('');
+    try {
+      const response = await fetch(`/api/inbox?applicant_id=${encodeURIComponent(applicantId)}`, { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.hint || payload.message || 'Could not load Zoho messages.');
+      setMailMessages(payload.data ?? []);
+    } catch (err) {
+      setMailError((err as Error).message || 'Could not load Zoho messages.');
+    } finally {
+      setMailLoading(false);
+    }
+  }
+
+  async function loadThread(threadId: string) {
+    if (!selected) return;
+    setActiveThreadId(threadId);
+    setThreadLoading(true);
+    setThreadError('');
+    setThreadMessages([]);
+    try {
+      const response = await fetch(`/api/inbox?applicant_id=${encodeURIComponent(selected.applicant_id)}&thread_id=${encodeURIComponent(threadId)}`, { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.hint || payload.message || 'Could not load this conversation.');
+      setThreadMessages(payload.data ?? []);
+    } catch (err) {
+      setThreadError((err as Error).message || 'Could not load this conversation.');
+    } finally {
+      setThreadLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (selectedId) void loadCandidateMessages(selectedId);
+    else {
+      setMailMessages([]);
+      setActiveThreadId('');
+      setThreadMessages([]);
+    }
+    // Loading is intentionally refreshed on candidate selection only; explicit refresh is available in the panel.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
 
   const checkedRows = useMemo(() => applicants.filter((a) => checked.has(a.applicant_id)), [applicants, checked]);
   const canDraft = checkedRows.length > 0 && checkedRows.every((r) => ACTIONABLE.draft.includes(r.stage as never));
@@ -182,10 +231,27 @@ export function MailView({ applicants, templates, replies, roles, categories: co
   function select(id: string) {
     setSelectedId(id);
     setCompose(EMPTY_COMPOSE);
-    setGmailMessages(null);
     setAttachError(null);
-    setCategoryDraft(applicants.find((a) => a.applicant_id === id)?.category ?? '');
+    const row = applicants.find((a) => a.applicant_id === id);
+    setCategoryDraft(row?.category ?? '');
+    setEmailDraft(row?.email ?? '');
+    setMailError('');
+    setThreadError('');
     clear();
+  }
+
+  // The sheet is edited outside this app — by hand, by a form, by a paste — so
+  // this page can be stale the moment it loads. router.refresh() re-runs the
+  // server components (the page is force-dynamic, so that is a fresh read of
+  // Sheets) without a full navigation, keeping selection and scroll.
+  function refreshFromSheet() {
+    clear();
+    startRefresh(() => router.refresh());
+  }
+
+  async function saveEmail() {
+    if (!selected) return;
+    await run('set-email', { applicant_id: selected.applicant_id, email: emailDraft.trim() });
   }
 
   async function bulkAct(action: string) {
@@ -208,19 +274,13 @@ export function MailView({ applicants, templates, replies, roles, categories: co
   async function startConversation() {
     const res = await run('start-conversation', {
       name: newContact.name.trim(), email: newContact.email.trim(),
-      job_role: newContact.role, category: newContact.category.trim(),
+      job_role: newContact.role, category: newContact.category.trim(), notes: newContact.notes.trim(),
     });
     if (res.ok && res.result?.applicant_id) {
       select(res.result.applicant_id);
-      setNewContact({ name: '', email: '', role: '', category: '' });
+      setNewContact({ name: '', email: '', role: '', category: '', notes: '' });
       setShowNewContact(false);
     }
-  }
-
-  async function syncGmail() {
-    if (!selected) return;
-    const res = await run('gmail-sync', { applicant_id: selected.applicant_id });
-    if (res.ok && res.result?.messages) setGmailMessages(res.result.messages);
   }
 
   async function useTemplate() {
@@ -231,21 +291,25 @@ export function MailView({ applicants, templates, replies, roles, categories: co
 
   async function writeWithAI() {
     if (!selected) return;
-    const latestGmail = [...(gmailMessages ?? [])].sort((a, b) => b.date.localeCompare(a.date))[0];
-    const gmailContext = latestGmail ? (latestGmail.text || latestGmail.html.replace(/<[^>]+>/g, ' ')).trim().slice(0, 2000) : '';
     const res = await run('reply-ai-draft', {
-      applicant_id: selected.applicant_id, template_id: compose.templateId, instructions: compose.instructions, gmail_context: gmailContext,
+      applicant_id: selected.applicant_id, template_id: compose.templateId, instructions: compose.instructions,
     });
     if (res.ok && res.result) setCompose((c) => ({ ...c, subject: res.result?.subject ?? c.subject, html: res.result?.html ?? c.html }));
   }
 
   async function send() {
     if (!selected) return;
+    const lastCandidateMessage = [...threadMessages].reverse().find((message) => message.fromAddress.toLowerCase().includes(selected.email.toLowerCase()));
     const res = await run('send-reply', {
       applicant_id: selected.applicant_id, template_id: compose.templateId, subject: compose.subject, html: compose.html,
+      ...(activeThreadId && lastCandidateMessage ? { reply_message_id: lastCandidateMessage.messageId } : {}),
       attachments: compose.attachments.map(({ filename, mimeType, base64 }) => ({ filename, mimeType, base64 })),
     });
-    if (res.ok) setCompose(EMPTY_COMPOSE);
+    if (res.ok) {
+      setCompose(EMPTY_COMPOSE);
+      await loadCandidateMessages(selected.applicant_id);
+      if (activeThreadId) await loadThread(activeThreadId);
+    }
   }
 
   async function addFiles(fileList: FileList | null) {
@@ -265,15 +329,17 @@ export function MailView({ applicants, templates, replies, roles, categories: co
   }
 
   const hasPlaceholder = PLACEHOLDER_RE.test(compose.subject) || PLACEHOLDER_RE.test(compose.html);
-  // Live sending with no mailbox configured is a broken deployment: the
-  // server refuses it outright (E-CONFIG-MISSING) rather than pretending, so
-  // the UI says so up front instead of letting someone click into the error.
-  const sendingBroken = !dryRun && !gmailConfigured;
-  const willSendForReal = !dryRun && gmailConfigured;
-  // sendEnabled is the Settings master switch. A reply is email leaving the
-  // building too, so it answers to the same switch the bulk Send does —
-  // enforced server-side as well; this only saves the round trip.
+  // Live sending with no mailer configured is a broken deployment: the server
+  // refuses it outright (E-CONFIG-MISSING) rather than pretending, so the UI
+  // says so up front instead of letting someone click into the error.
+  const sendingBroken = !dryRun && !mailerConfigured;
+  const willSendForReal = !dryRun && mailerConfigured;
+  // sendEnabled is the Settings master switch. Enforced server-side as well;
+  // this only saves the round trip.
   const canSendReply = Boolean(compose.subject.trim() && compose.html.trim() && !hasPlaceholder && sendEnabled && !sendingBroken);
+  // The model needs something to go on: either a brief, or a template to
+  // rewrite. Matches the server-side check in reply-ai-draft.
+  const canWriteWithAI = Boolean(compose.instructions.trim() || compose.templateId);
 
   return (
     <>
@@ -293,13 +359,41 @@ export function MailView({ applicants, templates, replies, roles, categories: co
           className={dryRun ? '' : 'danger'}
           disabled={!canSend || busy !== null || !sendEnabled || sendingBroken}
           onClick={() => setConfirmSend(true)}
-          title={sendingBroken ? 'Dry run is off but Gmail is not configured — sending is refused' : !sendEnabled ? 'Sending is switched off in Settings' : undefined}
+          title={sendingBroken ? 'Dry run is off but email sending is not configured — sending is refused' : !sendEnabled ? 'Sending is switched off in Settings' : undefined}
         >
           {dryRun ? 'Dry-run send' : 'Send'}{checked.size ? ` (${checked.size})` : ''}
         </button>
         <span className="spacer" />
         {checked.size ? <button className="ghost sm" onClick={() => setChecked(new Set())}>Clear selection</button> : null}
+        <span className="muted" style={{ fontSize: 12 }}>Sheet read {timeAgo(loadedAt)}</span>
+        <button
+          className="ghost sm" onClick={refreshFromSheet} disabled={refreshing}
+          title="Re-read the Applicants, Templates and Config tabs from Google Sheets"
+        >
+          {refreshing ? 'Refreshing…' : '⟳ Refresh from sheet'}
+        </button>
       </div>
+
+      {duplicates.length ? (
+        <div className="banner warn">
+          <span>!</span>
+          <div>
+            <strong>
+              {duplicates.length === 1 ? '1 duplicate' : `${duplicates.length} duplicates`} in the Applicants tab.
+            </strong>
+            <div className="hint" style={{ marginTop: 6 }}>
+              {duplicates.map((d) => (
+                <div key={`${d.kind}-${d.value}`}>
+                  {d.kind === 'applicant_id'
+                    ? <>Id <span className="mono">{d.value}</span> is on {d.rows.length} rows — every action on it silently hits the first one. </>
+                    : <><span className="mono">{d.value}</span> is on {d.rows.length} rows — they will be emailed {d.rows.length} times. </>}
+                  Sheet row{d.rows.length === 1 ? '' : 's'} {d.rows.map((r) => r._row).join(', ')}.
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {checked.size ? (
         <div className="toolbar">
@@ -348,7 +442,7 @@ export function MailView({ applicants, templates, replies, roles, categories: co
 
           {showNewContact ? (
             <div className="panel" style={{ padding: 12, marginBottom: 10 }}>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Start a conversation with someone not yet in the pipeline.</div>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Adds a row to the Applicants tab.</div>
               <label style={{ display: 'block', marginBottom: 8 }}>
                 <div className="muted" style={{ marginBottom: 4, fontSize: 12 }}>Name</div>
                 <input type="text" style={{ width: '100%' }} value={newContact.name} onChange={(e) => setNewContact((c) => ({ ...c, name: e.target.value }))} />
@@ -360,21 +454,26 @@ export function MailView({ applicants, templates, replies, roles, categories: co
               <div className="grid cols-2" style={{ marginBottom: 8 }}>
                 <label>
                   <div className="muted" style={{ marginBottom: 4, fontSize: 12 }}>Role (optional)</div>
-                  <select style={{ width: '100%' }} value={newContact.role} onChange={(e) => setNewContact((c) => ({ ...c, role: e.target.value }))}>
-                    <option value="">No role</option>
-                    {roles.map((r) => <option key={r} value={r}>{r}</option>)}
-                  </select>
+                  <input type="text" list="role-suggestions" style={{ width: '100%' }} value={newContact.role} onChange={(e) => setNewContact((c) => ({ ...c, role: e.target.value }))} />
                 </label>
                 <label>
                   <div className="muted" style={{ marginBottom: 4, fontSize: 12 }}>Category (optional)</div>
                   <input type="text" list="category-suggestions" style={{ width: '100%' }} value={newContact.category} onChange={(e) => setNewContact((c) => ({ ...c, category: e.target.value }))} />
                 </label>
               </div>
+              <label style={{ display: 'block', marginBottom: 8 }}>
+                <div className="muted" style={{ marginBottom: 4, fontSize: 12 }}>Notes (given to the AI as context)</div>
+                <input type="text" style={{ width: '100%' }} value={newContact.notes} onChange={(e) => setNewContact((c) => ({ ...c, notes: e.target.value }))} placeholder="e.g. referred by Meera, strong React portfolio" />
+              </label>
               <button className="primary sm" disabled={!newContact.email.trim() || busy !== null} onClick={startConversation}>
-                {busy === 'start-conversation' ? 'Starting…' : 'Start conversation'}
+                {busy === 'start-conversation' ? 'Adding…' : 'Add candidate'}
               </button>
             </div>
           ) : null}
+          <datalist id="role-suggestions">
+            {roles.map((r) => <option key={r} value={r} />)}
+          </datalist>
+
           <div className="toolbar" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
             <select value={role} onChange={(e) => setRole(e.target.value)} style={{ flex: 1, minWidth: 100 }}>
               <option value="">All roles</option>
@@ -398,7 +497,6 @@ export function MailView({ applicants, templates, replies, roles, categories: co
               <option value="category">Category</option>
               <option value="stage">Stage</option>
               <option value="role">Role</option>
-              <option value="intent">Reply intent</option>
             </select>
           </div>
 
@@ -414,17 +512,15 @@ export function MailView({ applicants, templates, replies, roles, categories: co
                     />
                     <button type="button" className="inbox-item-body" onClick={() => select(a.applicant_id)}>
                       <div className="inbox-item-top">
-                        <span className="inbox-item-name">
-                          {unhandledByApplicant.has(a.applicant_id) ? <span className="unread-dot" aria-hidden="true" /> : null}
-                          {a.name || '(no name)'}
-                        </span>
+                        <span className="inbox-item-name">{a.name || '(no name)'}</span>
                         <span className="muted" style={{ fontSize: 11, flex: 'none' }}>{timeAgo(a.updated_at || a.created_at)}</span>
                       </div>
                       <div className="muted" style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                         {a.job_role} <StagePill stage={a.stage} /> <CategoryPill category={a.category} />
+                        {dupIds.has(a.applicant_id) ? <span className="pill warn" title="Shares an id or email with another row">duplicate</span> : null}
                       </div>
                       <div className="inbox-item-snippet muted">
-                        {latestReplyByApplicant.get(a.applicant_id)?.snippet || (a.email_html ? 'No reply yet.' : 'No messages yet.')}
+                        {a.sent_at ? `Last emailed ${timeAgo(a.sent_at)}` : 'Not emailed yet.'}
                       </div>
                     </button>
                   </div>
@@ -437,7 +533,7 @@ export function MailView({ applicants, templates, replies, roles, categories: co
 
         {!selected ? (
           <div className="panel inbox-empty-pane">
-            <div className="empty">Select a candidate on the left to see their thread.</div>
+            <div className="empty">Select a candidate on the left to write to them.</div>
           </div>
         ) : (
           <div>
@@ -445,7 +541,7 @@ export function MailView({ applicants, templates, replies, roles, categories: co
               <div className="toolbar" style={{ marginBottom: 4 }}>
                 <div>
                   <h2 style={{ margin: 0 }}>{selected.name || '(no name)'}</h2>
-                  <div className="muted mono" style={{ fontSize: 12 }}>{selected.email}</div>
+                  <div className="muted mono" style={{ fontSize: 12 }}>{selected.email || 'no email address'}</div>
                 </div>
                 <span className="spacer" />
                 <StagePill stage={selected.stage} />
@@ -453,14 +549,22 @@ export function MailView({ applicants, templates, replies, roles, categories: co
               </div>
               <div className="toolbar" style={{ marginTop: 6, marginBottom: 0 }}>
                 <span className="muted" style={{ fontSize: 13 }}>
-                  {selected.job_role} · <span className="mono">{selected.applicant_id}</span>
+                  {selected.job_role || 'No role'} · <span className="mono">{selected.applicant_id}</span>
                 </span>
-                <span className="spacer" />
+              </div>
+              {/* A row can arrive with a missing or typo'd address; sending
+                  refuses those, so it is fixable here rather than in the sheet. */}
+              <div className="toolbar" style={{ marginTop: 6, marginBottom: 0 }}>
+                <span className="muted" style={{ fontSize: 12 }}>Email</span>
+                <input
+                  type="email" value={emailDraft} onChange={(e) => setEmailDraft(e.target.value)}
+                  placeholder="name@example.com" style={{ width: 260 }}
+                />
                 <button
-                  className="ghost sm" disabled={busy !== null || !gmailConfigured} onClick={syncGmail}
-                  title={!gmailConfigured ? 'Gmail is not configured — see dashboard/README.md' : "Import this candidate's real Gmail thread"}
+                  className="sm" disabled={busy !== null || !emailDraft.trim() || emailDraft.trim() === (selected.email || '')}
+                  onClick={saveEmail}
                 >
-                  {busy === 'gmail-sync' ? 'Syncing…' : '⟳ Sync from Gmail'}
+                  {busy === 'set-email' ? 'Saving…' : 'Save'}
                 </button>
               </div>
               <div className="toolbar" style={{ marginTop: 6, marginBottom: 0 }}>
@@ -477,90 +581,144 @@ export function MailView({ applicants, templates, replies, roles, categories: co
                   {busy === 'set-category' ? 'Saving…' : 'Save'}
                 </button>
               </div>
+              {/* Whatever is in their notes cell — the model is given this
+                  verbatim, so it is worth seeing before writing to them. */}
+              {selected.notes ? (
+                <div className="muted" style={{ fontSize: 13, marginTop: 10, fontStyle: 'italic' }}>{selected.notes}</div>
+              ) : null}
             </div>
 
-            <div className="thread">
-              {threadItems.map((item, i) => {
-                if (item.kind === 'sent') return (
-                  <div className="bubble bubble-sent" key={`sent-${i}`}>
-                    <div className="bubble-meta"><strong>You</strong><span className="muted">→ {selected.email}</span><span className="spacer" /><span className="muted">{shortDate(item.at)}</span></div>
-                    <div className="bubble-subject">{item.subject}</div>
-                    <div className="preview" dangerouslySetInnerHTML={{ __html: item.html }} />
-                  </div>
-                );
-                if (item.kind === 'reply') return (
-                  <div className="bubble bubble-reply" key={`reply-${i}`}>
-                    <div className="bubble-meta"><strong>{selected.name || item.from}</strong><IntentPill intent={item.intent} /><span className="spacer" /><span className="muted">{shortDate(item.at)}</span></div>
-                    <div>{item.snippet}</div>
-                    <div style={{ marginTop: 6 }}>{item.handled ? <span className="pill ok">handled</span> : <span className="pill warn">open</span>}</div>
-                  </div>
-                );
-                return (
-                  <div className={`bubble ${item.inbound ? 'bubble-reply' : 'bubble-sent'}`} key={`gmail-${i}`}>
-                    <div className="bubble-meta">
-                      <strong>{item.inbound ? (selected.name || item.from) : 'You'}</strong>
-                      <span className="pill info">real Gmail</span>
-                      <span className="spacer" /><span className="muted">{shortDate(item.at)}</span>
-                    </div>
-                    <div className="bubble-subject">{item.subject}</div>
-                    {item.html ? <div className="preview" dangerouslySetInnerHTML={{ __html: item.html }} /> : <div>{item.text}</div>}
-                    {item.attachments.length ? (
-                      <div className="attachment-list">
-                        {item.attachments.map((att) => (
-                          <a
-                            key={att.attachmentId} className="pill attachment-pill"
-                            href={`/api/gmail-attachment?messageId=${encodeURIComponent(att.messageId)}&attachmentId=${encodeURIComponent(att.attachmentId)}&filename=${encodeURIComponent(att.filename)}&mimeType=${encodeURIComponent(att.mimeType)}`}
-                          >
-                            📎 {att.filename} <span className="muted">({formatBytes(att.size)})</span>
-                          </a>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-              {threadItems.length === 0 ? <div className="empty">No messages in this thread yet — send the first one below, or sync from Gmail.</div> : null}
-            </div>
-
-            <div className="panel">
-              <h2>Reply</h2>
-              <p className="sub">
-                Load a template, write it yourself, or let AI draft it — review before sending either way.
-                {sendingBroken
-                  ? ' Dry run is off but Gmail is not configured — sending is refused until that is fixed. Nothing is being logged as sent.'
-                  : willSendForReal ? ' Gmail is configured and dry run is off: this will send for real.'
-                  : gmailConfigured ? ' Dry run is on — this will be logged, not delivered, until you turn it off in Settings.'
-                  : ' Gmail is not configured and dry run is on — this will be simulated, not delivered.'}
-              </p>
-
-              <div className="grid cols-2" style={{ marginBottom: 12 }}>
-                <label>
-                  <div className="muted" style={{ marginBottom: 4 }}>Template</div>
-                  <select style={{ width: '100%' }} value={compose.templateId} onChange={(e) => setCompose((c) => ({ ...c, templateId: e.target.value }))}>
-                    <option value="">Blank message</option>
-                    {activeTemplates.map((t) => (
-                      <option key={t.template_id} value={t.template_id}>{t.name}{t.job_role ? ` — ${t.job_role}` : ''}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <div className="muted" style={{ marginBottom: 4 }}>Extra instructions for AI (optional)</div>
-                  <input
-                    type="text" style={{ width: '100%' }} value={compose.instructions}
-                    onChange={(e) => setCompose((c) => ({ ...c, instructions: e.target.value }))}
-                    placeholder="e.g. confirm the interview is remote"
-                  />
-                </label>
+            <div className="panel" style={{ marginTop: 14 }} aria-live="polite">
+              <div className="toolbar" style={{ marginBottom: 10 }}>
+                <div>
+                  <h2 style={{ margin: 0 }}>Zoho conversations</h2>
+                  <div className="muted" style={{ fontSize: 12 }}>Loaded live for this candidate; message bodies are not saved to Sheets.</div>
+                </div>
+                <span className="spacer" />
+                <button className="sm" disabled={mailLoading} onClick={() => void loadCandidateMessages(selected.applicant_id)}>
+                  {mailLoading ? 'Loading…' : 'Refresh mail'}
+                </button>
               </div>
 
+              {mailLoading ? (
+                <div className="empty" role="status">Loading Zoho messages… The first request after the service wakes may take a little longer.</div>
+              ) : null}
+              {mailError ? <div className="banner danger"><span>⚠</span><div>{mailError}</div></div> : null}
+              {!mailLoading && !mailError && mailThreads.length === 0 ? (
+                <div className="empty">No Zoho messages found for this email address.</div>
+              ) : null}
+
+              {mailThreads.length ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 0.8fr) minmax(0, 1.6fr)', gap: 12 }}>
+                  <div className="inbox-list" style={{ maxHeight: 360, overflowY: 'auto' }}>
+                    {mailThreads.map((thread) => (
+                      <button
+                        type="button" key={thread.id}
+                        className={`inbox-item-body${thread.id === activeThreadId ? ' active' : ''}`}
+                        style={{ width: '100%', textAlign: 'left', padding: 10 }}
+                        onClick={() => void loadThread(thread.id)}
+                      >
+                        <strong>{thread.subject}</strong>
+                        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                          {thread.messages.length} message(s) · {shortDate(messageDate(thread.latest.sentDateInGMT || thread.latest.receivedTime))}
+                        </div>
+                        <div className="inbox-item-snippet muted">{thread.latest.summary || thread.latest.fromAddress}</div>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div>
+                    {!activeThreadId ? <div className="inbox-empty-pane empty">Select a conversation to load its full messages.</div> : null}
+                    {threadLoading ? <div className="inbox-empty-pane empty" role="status">Loading full conversation from Zoho…</div> : null}
+                    {threadError ? <div className="banner danger"><span>⚠</span><div>{threadError}</div></div> : null}
+                    {!threadLoading && threadMessages.map((message) => (
+                      <article key={message.messageId} className="bubble" style={{ marginBottom: 10, overflow: 'hidden' }}>
+                        <div className="bubble-meta">
+                          <strong>{message.fromAddress || 'Unknown sender'}</strong>
+                          <span className="muted">→ {message.toAddress || 'recipient'}</span>
+                          <span className="spacer" />
+                          <span className="muted">{shortDate(messageDate(message.sentDateInGMT || message.receivedTime))}</span>
+                        </div>
+                        <div className="bubble-subject">{message.subject}</div>
+                        <iframe
+                          title={`Email from ${message.fromAddress || 'unknown sender'}`}
+                          sandbox=""
+                          referrerPolicy="no-referrer"
+                          style={{ width: '100%', minHeight: 180, height: 260, border: 0, background: 'white', borderRadius: 8 }}
+                          srcDoc={`<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>${message.content || '<p>(No message body returned.)</p>'}</body></html>`}
+                        />
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Retained applicant draft/sent snapshot; full mailbox history above is live from Zoho. */}
+            {selected.email_html ? (
+              <div className="thread">
+                <div className="bubble bubble-sent">
+                  <div className="bubble-meta">
+                    <strong>You</strong><span className="muted">→ {selected.email}</span>
+                    <span className="spacer" />
+                    <span className="muted">{selected.sent_at ? shortDate(selected.sent_at) : 'draft, not sent'}</span>
+                  </div>
+                  <div className="bubble-subject">{selected.email_subject}</div>
+                  <div className="preview" dangerouslySetInnerHTML={{ __html: selected.email_html }} />
+                </div>
+              </div>
+            ) : null}
+
+            <div className="panel">
+              <h2>Write to {selected.name?.split(' ')[0] || 'this candidate'}</h2>
+              <p className="sub">
+                Say what the email should cover — their name{selected.job_role ? `, the ${selected.job_role} role` : ''}
+                {selected.notes ? ', your notes on them' : ''} and the branding are filled in from the sheet,
+                so you never type those.
+                {sendingBroken
+                  ? ' Dry run is off but email sending is not configured — sending is refused until that is fixed. Nothing is being logged as sent.'
+                  : willSendForReal ? ' Sending is live: this will reach them for real.'
+                  : mailerConfigured ? ' Dry run is on — this will be logged, not delivered, until you turn it off in Settings.'
+                  : ' Email sending is not configured and dry run is on — this will be simulated, not delivered.'}
+              </p>
+
+              <label style={{ display: 'block', marginBottom: 12 }}>
+                <div className="muted" style={{ marginBottom: 4 }}>What should this email say?</div>
+                <textarea
+                  rows={3} value={compose.instructions}
+                  onChange={(e) => setCompose((c) => ({ ...c, instructions: e.target.value }))}
+                  placeholder={`e.g. invite ${selected.name?.split(' ')[0] || 'them'} to a 30-minute intro call next week, mention it is remote, ask for two time slots`}
+                />
+              </label>
+
+              <label style={{ display: 'block', marginBottom: 12 }}>
+                <div className="muted" style={{ marginBottom: 4 }}>Base it on a template (optional)</div>
+                <select style={{ width: '100%' }} value={compose.templateId} onChange={(e) => setCompose((c) => ({ ...c, templateId: e.target.value }))}>
+                  <option value="">No template — write from the instructions alone</option>
+                  {activeTemplates.map((t) => (
+                    <option key={t.template_id} value={t.template_id}>{t.name}{t.job_role ? ` — ${t.job_role}` : ''}</option>
+                  ))}
+                </select>
+              </label>
+
               <div className="toolbar">
-                <button disabled={busy !== null} onClick={useTemplate}>{busy === 'reply-template-fill' ? 'Loading…' : '✍️ Write manually'}</button>
-                <button disabled={busy !== null} onClick={writeWithAI}>{busy === 'reply-ai-draft' ? 'Writing…' : '✨ Write with AI'}</button>
+                <button
+                  className="primary" disabled={busy !== null || !canWriteWithAI} onClick={writeWithAI}
+                  title={canWriteWithAI ? undefined : 'Type what the email should say, or pick a template'}
+                >
+                  {busy === 'reply-ai-draft' ? 'Writing…' : '✨ Write with AI'}
+                </button>
+                <button
+                  disabled={busy !== null || !compose.templateId} onClick={useTemplate}
+                  title={compose.templateId ? 'Fill the template in as-is, no model call' : 'Pick a template first'}
+                >
+                  {busy === 'reply-template-fill' ? 'Loading…' : 'Use template as-is'}
+                </button>
                 <span className="spacer" />
                 {compose.subject || compose.html || compose.attachments.length ? <button className="ghost sm" onClick={() => setCompose(EMPTY_COMPOSE)}>Clear</button> : null}
               </div>
 
-              <label style={{ display: 'block', marginBottom: 10 }}>
+              <label style={{ display: 'block', marginBottom: 10, marginTop: 12 }}>
                 <div className="muted" style={{ marginBottom: 4 }}>Subject</div>
                 <input type="text" style={{ width: '100%' }} value={compose.subject} onChange={(e) => setCompose((c) => ({ ...c, subject: e.target.value }))} />
               </label>
