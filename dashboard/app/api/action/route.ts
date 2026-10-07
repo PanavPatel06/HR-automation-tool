@@ -5,7 +5,7 @@ import { readTab, patchRows, appendRow, setConfig, isDemoMode, parseConfig, Shee
 import { groqJson, GroqError } from '../../../lib/groq';
 import { buildMergeContext, render, validateHtml, selectTemplate, renderSkeleton, DEFAULT_TEMPLATE_BODY, TemplateError, FIELD_RE } from '../../../lib/template';
 import { selectForDrafting, usesAi, buildDraftPrompt, checkDraftSchema, assembleDraft } from '../../../lib/draft';
-import { sendMail, fetchUrlAttachment, isMailerConfigured, mailFrom, mailHost, verifyMailer, MailerError, MAX_ATTACHMENTS_BYTES, type OutgoingAttachment } from '../../../lib/mailer';
+import { sendMail, sendReply, fetchUrlAttachment, isMailerConfigured, mailFrom, mailHost, verifyMailer, MailerError, MAX_ATTACHMENTS_BYTES, type OutgoingAttachment } from '../../../lib/mailer';
 import { ACTIONABLE } from '../../../lib/contract';
 import { findDuplicates, describeDuplicates } from '../../../lib/duplicates';
 
@@ -36,7 +36,7 @@ const EMAIL_RE = /^[^\s@,;:<>()[\]\\]+@[^\s@.]+(\.[^\s@.]+)+$/;
  * The alternative — quietly logging the send as though it happened — is the
  * worst failure this system could have: rows march to SENT, EmailLog says
  * sent, and nobody finds out until a candidate is never heard from. One blank
- * MAIL_PASSWORD in the deploy environment would do it.
+ * a missing Zoho refresh token in the deploy environment would do it.
  *
  * Returns a response when sending must be refused, otherwise null.
  */
@@ -44,7 +44,7 @@ function requireMailerWhenLive(dryRun: boolean) {
   if (dryRun || isMailerConfigured()) return null;
   return fail(503, 'E-CONFIG-MISSING',
     'Dry run is off, but email sending is not configured — nothing was sent.',
-    'Set MAIL_USER and MAIL_PASSWORD in the deployment environment, or turn dry run back on in Settings. Nothing is logged as sent while this is broken.');
+    'Set the Zoho OAuth credentials and account/folder details in the deployment environment, or turn dry run back on in Settings. Nothing is logged as sent while this is broken.');
 }
 
 /** Candidates hit Reply on the email; their answer must reach a human, not this app. */
@@ -280,7 +280,7 @@ export async function POST(req: Request) {
       const today = new Date().toISOString().slice(0, 10);
       const sentToday = (await readTab('EmailLog')).filter((r) => r.at.startsWith(today) && r.result === 'sent').length;
       if (sentToday >= cap) {
-        return fail(429, 'E-QUOTA', `Daily send cap of ${cap} reached.`, "Sending resumes tomorrow, or raise send_daily_cap in Settings — Gmail itself cuts off around 500 recipients a day.");
+        return fail(429, 'E-QUOTA', `Daily send cap of ${cap} reached.`, 'Sending resumes tomorrow, or raise send_daily_cap in Settings after checking your Zoho Mail plan limit.');
       }
 
       if (templateId) {
@@ -295,7 +295,10 @@ export async function POST(req: Request) {
 
       let providerMessageId = '';
       if (willSendForReal) {
-        const sent = await sendMail({ to: applicant.email, subject, html, attachments, replyTo: replyToAddress(config) });
+        const replyMessageId = String(body.reply_message_id ?? '').trim();
+        const sent = replyMessageId && attachments.length === 0
+          ? await sendReply({ messageId: replyMessageId, to: applicant.email, subject, html, replyTo: replyToAddress(config) })
+          : await sendMail({ to: applicant.email, subject, html, attachments, replyTo: replyToAddress(config) });
         providerMessageId = sent.id;
       }
 
@@ -337,7 +340,7 @@ export async function POST(req: Request) {
         status: 'ok',
         notes: willSendForReal
           ? `Sent to ${applicant.email}${attachmentNote}. Replies go to ${replyToAddress(config) || mailFrom()}.`
-          : `"Sent" to ${applicant.email}${attachmentNote} — logged in the Email Log, not actually delivered. ${isMailerConfigured() ? 'Turn off dry run in Settings to send for real.' : 'Set MAIL_USER and MAIL_PASSWORD to send for real — see README.md.'}`,
+          : `"Sent" to ${applicant.email}${attachmentNote} — logged in the Email Log, not actually delivered. ${isMailerConfigured() ? 'Turn off dry run in Settings to send for real.' : 'Configure the Zoho OAuth credentials to send for real.'}`,
       } });
     }
 
@@ -492,7 +495,7 @@ export async function POST(req: Request) {
     // --- Preflight: check every credential without writing or sending -------
     if (action === 'preflight') {
       const checks: Array<{ check: string; ok: boolean; detail: string; fix: string }> = [];
-      const warnOnly = new Set(['dry_run is ON', 'Mailbox logs in (optional)', 'No repeated email address', 'Email addresses look valid']);
+      const warnOnly = new Set(['dry_run is ON', 'Zoho Mail API works (optional)', 'No repeated email address', 'Email addresses look valid']);
       const add = (check: string, ok: boolean, detail = '', fix = '') => checks.push({ check, ok, detail, fix: ok ? '' : fix });
       // Whether a missing mailer is a warning or a failure depends on dry run,
       // which is read further down. Recorded here, judged at the end.
@@ -524,15 +527,14 @@ export async function POST(req: Request) {
       // Optional only while dry run is on. Once sending is live it is the
       // difference between mail going out and mail silently not going out,
       // so it is promoted to a hard failure and named accordingly.
-      const label = liveSending ? 'Mailbox logs in (REQUIRED — dry run is off)' : 'Mailbox logs in (optional)';
+      const label = liveSending ? 'Zoho Mail API works (REQUIRED — dry run is off)' : 'Zoho Mail API works (optional)';
       if (!isMailerConfigured()) {
         add(label, false,
           liveSending ? 'MISSING — every send will be refused until this is fixed' : 'not set — sends stay logged-only, never delivered',
-          'Set MAIL_USER and MAIL_PASSWORD in the deployment environment. For Gmail that is your address and a 16-character App Password (2-Step Verification must be on).');
+          'Set ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN, ZOHO_ACCOUNT_ID, ZOHO_FOLDER_ID, and ZOHO_FROM_ADDRESS in the deployment environment.');
       } else {
-        // Actually open the connection and authenticate. Checking the two
-        // variables are merely *present* is what let a typo'd password sit
-        // undetected until the first real send; this proves it logs in.
+        // Refresh the token and make a read-only mailbox request, without
+        // sending email or writing a conversation to the sheet.
         try {
           await verifyMailer();
           add(label, true, `${mailFrom()} via ${mailHost()}`);

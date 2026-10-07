@@ -36,23 +36,17 @@ services:
         sync: false
       - key: GROQ_MODEL
         sync: false
-      # --- Sending email (SMTP). Blank keeps sending logged-only, and the
-      # app REFUSES to send at all once dry run is turned off. ---
-      # The sending mailbox, e.g. 3spacetechcorp@gmail.com
-      - key: MAIL_USER
+      # --- Zoho Mail API (India data center) ---
+      # Use the long-lived refresh token, never the two-minute authorization code.
+      - key: ZOHO_CLIENT_ID
         sync: false
-      # For Gmail: a 16-character App Password, NOT the account password.
-      # 2-Step Verification must be on for the account to have one.
-      # (Personal Gmail only — Workspace accounts cannot use App Passwords.)
-      - key: MAIL_PASSWORD
+      - key: ZOHO_CLIENT_SECRET
         sync: false
-      # Optional display name, e.g. "3Space Hiring <3spacetechcorp@gmail.com>".
-      # Defaults to MAIL_USER.
-      - key: MAIL_FROM
+      - key: ZOHO_REFRESH_TOKEN
         sync: false
-      # Optional. Default smtp.gmail.com:465. Set both to use another server;
-      # 465 is implicit TLS, 587 is STARTTLS.
-      - key: MAIL_HOST
+      - key: ZOHO_ACCOUNT_ID
         sync: false
-      - key: MAIL_PORT
+      - key: ZOHO_FOLDER_ID
+        sync: false
+      - key: ZOHO_FROM_ADDRESS
         sync: false

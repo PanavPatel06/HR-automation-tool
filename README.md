@@ -13,8 +13,8 @@ Runs on free tiers, with no backend to host beyond the dashboard itself.
 
 ```
                     ┌───────────────┐
-   you type ───────▶│ Google Sheet  │◀──── the app writes back
-   name/email/role  │ (the database)│      drafts + send log
+   Google Form ────▶│ Google Sheet  │◀──── the app writes back
+   candidate rows   │ (the roster)  │      drafts + send log
                     └───────┬───────┘
                             │
                     ┌───────▼───────┐      ┌──────┐
@@ -23,27 +23,19 @@ Runs on free tiers, with no backend to host beyond the dashboard itself.
                     └───────┬───────┘
                             │
                     ┌───────▼───────┐
-                    │  SMTP (Gmail) │─────▶ candidate's inbox
-                    └───────────────┘             │
-                                                  │
-                    their reply ──────────────────┘
-                    goes to your normal mailbox,
-                    which you read like any other email
+                    │ Zoho Mail API │─────▶ candidate's inbox
+                    └───────┬───────┘             │
+                            │ live thread reads   │
+                            └◀──── candidate reply┘
 ```
 
-The dashboard is the only server-side piece. It reads and writes the sheet
-directly, calls Groq to draft, and sends over SMTP — all in the same
-request a person triggers by clicking a button. Nothing polls on a schedule and
-nothing runs unattended.
+The dashboard is the only server-side piece. Google Sheets remains the
+candidate roster and Google Form intake; Zoho Mail remains the source of email
+messages. The app reads a candidate's conversations from Zoho on demand and
+does not persist message bodies in the sheet. Nothing polls on a schedule.
 
-**The app does not read anyone's mailbox.** It sends *from* a real Gmail account
-over SMTP, so replies land in that account's inbox and you read them there like
-any other email — and every send also appears in its Sent folder.
-
-That is a deliberate trade. Sending this way needs no Google Cloud project, no
-OAuth consent screen, no refresh token that expires after seven days, and no
-domain of your own. The whole setup is: turn on 2-Step Verification, generate a
-16-character App Password, paste it in.
+Zoho API access is server-side. The app refreshes its short-lived access token
+using the stored OAuth refresh token; secrets never go to the browser.
 
 ---
 
@@ -54,7 +46,8 @@ domain of your own. The whole setup is: turn on 2-Step Verification, generate a
 | **Write to one candidate** | Open them, type what the email should cover, click **Write with AI**. Their name, role and category come from the sheet — you never retype them. |
 | **Bulk drafting** | Select several, click **Generate drafts**: picks the most specific matching template, then asks Groq to personalise it — but only for templates that opt in with `{{ai_body}}`. |
 | **Review** | Every message is previewed and sent by a human. The model only ever fills the compose box. |
-| **Sending** | Over SMTP, per-recipient isolated, with a daily cap and a dry-run mode that is **on by default**. |
+| **Mail** | Sends with Zoho Mail API; reads candidate conversations live on demand. Message bodies are not stored in Sheets. |
+| **Sending safety** | Per-recipient isolated, with a daily cap and a dry-run mode that is **on by default**. |
 | **Branding** | Every email — template or AI-written — is wrapped in the same letterhead shell automatically. |
 | **Observability** | Every failure has a typed code, a plain-English message and a fix. The Console page is the whole debugging surface. |
 
@@ -67,7 +60,7 @@ domain of your own. The whole setup is: turn on 2-Step Verification, generate a
 | **Node** | 20 or newer |
 | **Google account** | For the spreadsheet |
 | **Groq API key** | free — [console.groq.com/keys](https://console.groq.com/keys) |
-| **A Gmail account** | The one that sends, and receives replies. **Personal, not Workspace** — see below |
+| **Zoho Mail account** | The mailbox that sends and receives candidate replies; OAuth API access must be enabled. |
 | **Nothing else** | No domain, no email provider account, no DNS records |
 | **Render account** | free, for the dashboard |
 
@@ -141,7 +134,7 @@ types stay right. The ones that matter:
 | `dry_run` | `true` | **The safety catch.** True = sends are logged, not delivered. |
 | `toggle_send` | `false` | Master switch for sending. |
 | `toggle_draft` | `true` | Master switch for AI drafting. |
-| `send_daily_cap` | `400` | Kept under Gmail's ~500 recipients/day. |
+| `send_daily_cap` | `400` | App-side safety ceiling; set below the connected Zoho Mail plan limit. |
 | `company_email` | — | **Where candidates' replies go.** Set this to a mailbox you actually read. |
 | `company_name`, `hr_name`, `hr_signature` | — | Merge fields. |
 | `company_phone`, `company_incubator`, `company_logo_url` | — | The letterhead block. |
@@ -217,44 +210,20 @@ None of this is required — it's what stops a shared sheet rotting:
 No OAuth consent screen, no user login, no token expiry — a service account is
 just a key that works until you revoke it.
 
-### 2. Sending email (Gmail App Password)
+### 2. Zoho Mail API credentials
 
-No domain, no provider signup, nothing that expires:
+Register a server-based OAuth client in Zoho API Console, authorize the Mail
+read/create scopes with `access_type=offline`, and exchange the short-lived code
+for a refresh token. Keep the client secret and refresh token private. The app
+needs the client ID, client secret, refresh token, Zoho account ID, Inbox folder
+ID, and the authorized sender address in its server environment. Follow Zoho's
+[OAuth guide](https://www.zoho.com/mail/help/api/using-oauth-2.html) for the
+authorization-code exchange. The two-minute authorization code is not a
+deployment credential.
 
-1. On the Gmail account that should send — e.g. `3spacetechcorp@gmail.com` —
-   turn on **2-Step Verification**
-   ([myaccount.google.com/security](https://myaccount.google.com/security)).
-   You cannot generate an App Password without it.
-2. Go to
-   [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords),
-   name it `hr-dashboard`, and **Create**.
-3. Google shows a 16-character password as four groups of four. Copy it and
-   **remove the spaces** — it is shown once.
-4. Set `MAIL_USER` to the Gmail address and `MAIL_PASSWORD` to that App
-   Password.
-
-```bash
-MAIL_USER=3spacetechcorp@gmail.com
-MAIL_PASSWORD=abcdefghijklmnop          # 16 chars, no spaces
-MAIL_FROM=3Space Hiring <3spacetechcorp@gmail.com>   # optional display name
-```
-
-> **Personal Gmail only.** Google Workspace accounts cannot use App Passwords —
-> Google requires OAuth 2.0 for those. If the sending account is on Workspace,
-> either use a personal Gmail for sending, or point `MAIL_HOST`/`MAIL_PORT` at a
-> different SMTP server.
-
-Nothing here is Gmail-specific. `MAIL_HOST` and `MAIL_PORT` default to
-`smtp.gmail.com:465` but point anywhere — a company mail server, a paid relay —
-so outgrowing Gmail is an environment change, not a code change. Port 465 is
-implicit TLS; 587 is STARTTLS.
-
-Replies go to the sending account by default. Set `company_email` in **Settings**
-only if they should land somewhere else — it becomes the `Reply-To`.
-
-If `MAIL_USER` or `MAIL_PASSWORD` is missing while dry run is off, the app
-**refuses every send** with `E-CONFIG-MISSING` rather than pretending. See
-[Safety properties](#safety-properties).
+Google Sheets remains unchanged: Google Form responses populate Applicants,
+and the app continues to update applicant status and EmailLog. Conversation
+bodies are fetched from Zoho when viewed and are not written to Sheets.
 
 ### 3. Dashboard, locally
 
@@ -266,7 +235,7 @@ cd dashboard && npm install
 cp .env.example .env.local
 # fill in SHEET_ID, GOOGLE_SERVICE_ACCOUNT_JSON, GROQ_API_KEY,
 # DASHBOARD_PASSWORD, SESSION_SECRET (openssl rand -hex 32)
-# leave MAIL_PASSWORD blank for now
+# set ZOHO_* values to enable real Zoho API access; otherwise keep dry-run on
 
 cd .. && npm run bootstrap:sheets   # creates the four tabs
 npm run seed:demo                   # optional: one template + 3 fake candidates
@@ -287,7 +256,7 @@ The repo has a [render.yaml](render.yaml) blueprint, so this is mostly clicking.
    `render.yaml`, creates one web service, and prompts for each secret.
 3. Fill in: `DASHBOARD_PASSWORD`, `SESSION_SECRET`, `SHEET_ID`,
    `GOOGLE_SERVICE_ACCOUNT_JSON` (paste the whole JSON as-is — no quotes, no
-   escaping), `GROQ_API_KEY`, `MAIL_USER`, `MAIL_PASSWORD`.
+   escaping), `GROQ_API_KEY`, and all `ZOHO_*` values from `.env.example`.
 4. Deploy. The first build takes a few minutes.
 
 Render sets `RENDER_EXTERNAL_URL` itself, which is how emails find the logo at
@@ -311,10 +280,8 @@ Then go live:
 
 1. Settings → turn **Sending** on.
 2. Settings → turn **dry run** off.
-3. Run preflight again. The mailbox check **opens a real SMTP connection and
-   authenticates**, so a green tick here means the credentials genuinely work —
-   not merely that the variables are set. It is a *hard* failure once dry run
-   is off.
+3. Run preflight again. The Zoho check refreshes an OAuth access token and
+   makes a read-only mailbox request; it does not send mail or store a thread.
 4. Send one real email **to yourself**. If it arrives, every other send uses the
    identical code path.
 
@@ -431,7 +398,7 @@ without it.
 | [lib/schema.js](lib/schema.js) | **Single source of truth** for tabs, columns, the stage machine, Config defaults |
 | [dashboard/lib/contract.ts](dashboard/lib/contract.ts) | Hand-mirror of the above (the dashboard deploys from `dashboard/` alone and can't import outside it). `tests/contract-parity.test.js` fails the build if they drift |
 | [dashboard/lib/sheets.ts](dashboard/lib/sheets.ts) | All Sheets I/O, plus the demo dataset |
-| [dashboard/lib/mailer.ts](dashboard/lib/mailer.ts) | All outbound email (SMTP via nodemailer, pooled) |
+| [dashboard/lib/mailer.ts](dashboard/lib/mailer.ts) | Zoho OAuth refresh, Mail API sending, and on-demand conversation reads |
 | [dashboard/lib/template.ts](dashboard/lib/template.ts) | Merge-field rendering, HTML validation, template selection, the branded skeleton |
 | [dashboard/lib/draft.ts](dashboard/lib/draft.ts) | Batch selection, the draft prompt, the schema gate on model output |
 | [dashboard/lib/groq.ts](dashboard/lib/groq.ts) | The only model provider |
@@ -469,9 +436,10 @@ reading the candidate's answer in your own inbox.
 ### What is deliberately not automated
 
 - **Approval.** A human reads every email before it goes.
-- **Intake.** No scraper, no inbox parser. Rows arrive because someone put them
-  there.
-- **Reading replies.** They land in a real mailbox and a human reads them.
+- **Intake.** Google Form responses populate the Applicants sheet; the app
+  reads that roster on each page load.
+- **Conversation storage.** Message bodies are fetched live from Zoho and are
+  never written to Sheets or the app's local filesystem.
 - **Anything on a timer.** Every action starts with a click.
 
 ---
@@ -485,8 +453,8 @@ protecting when changing anything:
 2. **`DRAFTED → SENT` is impossible.** Approval is enforced server-side.
 3. **Dry run ships ON and `toggle_send` ships OFF.** A fresh deployment cannot
    email anyone by accident.
-4. **A broken mailer stops the line; it never fakes a send.** Dry run off with no
-   `MAIL_PASSWORD` returns `503 E-CONFIG-MISSING` *before* any row or log line
+4. **A broken mailer stops the line; it never fakes a send.** Dry run off without
+   valid Zoho OAuth/API configuration returns `503 E-CONFIG-MISSING` *before* any row or log line
    is written, shows a red *Sending is broken* banner, and fails preflight. The
    one thing this system must never do is report an email as sent that no
    candidate will ever receive.
@@ -536,14 +504,15 @@ and stops; the human who clicked decides whether to try again.
 | `E-CONFIG-CRED` | `GOOGLE_SERVICE_ACCOUNT_JSON` isn't valid JSON | Re-paste the whole key file. |
 | `E-CONFIG` | A master switch is off | Turn it on in Settings. |
 
-### `E-MAIL-*` — sending
+### `E-ZOHO-*` — Zoho Mail API
 
 | Code | Cause | Fix |
 |---|---|---|
-| `E-MAIL-AUTH` | SMTP rejected the login (`535`) | You used the Google account password instead of an App Password, 2-Step Verification is off, or the 16 characters were pasted with spaces. **The most common first-send failure.** |
-| `E-MAIL-429` | The server is throttling | Gmail's daily quota — about 500 recipients over a rolling 24 hours on a personal account. It resumes on its own. |
-| `E-MAIL-REJECTED` | The recipient was rejected (`550`/`553`) | A mistyped or dead address. Fix it in the candidate's **Email** box. |
-| `E-MAIL-NETWORK` | Could not reach the mail server | Check `MAIL_HOST`/`MAIL_PORT`. 465 needs implicit TLS, 587 needs STARTTLS — a mismatch hangs rather than erroring cleanly. Nothing was sent. |
+| `E-ZOHO-OAUTH` / `E-ZOHO-AUTH` | Token refresh or API authentication failed | Check that client ID/secret match the non-revoked refresh token and that the token has Mail read/create scopes. |
+| `E-ZOHO-429` | Zoho is throttling API requests | Wait and retry; reduce refresh/list frequency. |
+| `E-ZOHO-API` | Zoho rejected a Mail API request | Check the account/folder IDs, scopes, recipient, and Zoho response. |
+| `E-ZOHO-NETWORK` | The Zoho service could not be reached | Retry after checking network and Zoho service availability. A failed send is not marked sent. |
+| `E-ZOHO-ATTACHMENT` | Zoho rejected an attachment upload | Check file size/type and the `ZohoMail.messages.CREATE` scope. |
 | `E-MAIL-TEMPLATE` | Unresolved `{{field}}`, invalid HTML, or an empty subject | **Nothing was sent.** Fix the template or supply the missing value. |
 | `E-ATTACHMENT-FETCH` | A template's `attachment_url` was unreachable | Confirm the link is shared "Anyone with the link" and loads without signing in. |
 
@@ -563,7 +532,7 @@ and stops; the human who clicked decides whether to try again.
 | `E-AUTH` | Session expired — sign in again. |
 | `E-BADREQ` | Missing a required field (no applicant selected, no brief and no template, ...). |
 | `E-STAGE` | A bulk action was attempted on rows not in a legal stage for it. |
-| `E-QUOTA` | The day's `send_daily_cap` is used up. Resumes tomorrow, or raise it in Settings — Gmail itself stops around 500 recipients/day. |
+| `E-QUOTA` | The day's `send_daily_cap` is used up. Resumes tomorrow, or raise it in Settings after checking the Zoho Mail plan limit. |
 | `E-VALIDATION` | Attachments exceed the size cap, or an edited email address is malformed or already on another row. |
 | `E-NOTFOUND` | The applicant/template/config key named in the request doesn't exist. |
 | `E-UNKNOWN` | An unclassified failure. Check the Render logs for the stack trace. Seeing it repeatedly means a failure mode worth its own typed code. |
@@ -585,12 +554,11 @@ In order:
 1. **Console → Run preflight.** It names the broken credential.
 2. **Settings → is Sending on?** It ships off.
 3. **Settings → is dry run off?** Dry run logs without delivering, by design.
-4. **Red banner saying "Sending is broken"?** Dry run is off but the mailer
-   isn't configured. Set `MAIL_USER` and `MAIL_PASSWORD`. Nothing has been
-   falsely recorded as sent.
-5. **`E-MAIL-AUTH`?** Almost always the App Password: either 2-Step
-   Verification is off, you used the account password, or the 16 characters
-   were pasted with Google's display spaces still in them.
+4. **Red banner saying "Sending is broken"?** Dry run is off but the Zoho API
+   credentials/account configuration is missing. Run preflight for the exact
+   missing values; nothing has been falsely recorded as sent.
+5. **`E-ZOHO-OAUTH` or `E-ZOHO-AUTH`?** Check the refresh token, client pair,
+   and `ZohoMail.messages.READ` / `ZohoMail.messages.CREATE` scopes.
 6. **Rows stuck at `APPROVED` with errors in the Email Log?** Read the
    `error_message` column — that's the reason, per recipient.
 
@@ -646,13 +614,11 @@ Google key: create a new service-account key, update the env var, redeploy,
 |---|---|
 | Google Sheets | free |
 | Groq | free tier; only `{{ai_body}}` templates and **Write with AI** spend tokens |
-| Gmail SMTP | free: ~500 recipients/day, rolling 24h |
+| Zoho Mail API | Subject to the mailbox's plan and API limits |
 | Render | free (sleeps when idle) |
 | **Total** | **₹0/month** at this volume |
 
-The binding constraint is Gmail's ~500 recipients a day. `send_daily_cap`
-defaults to 400, leaving headroom for the mail you send by hand from the same
-account.
+Set `send_daily_cap` below the current outbound limit for the Zoho mailbox.
 
 ---
 

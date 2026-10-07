@@ -13,7 +13,8 @@ app/api/login|logout/     shared-password session
 lib/contract.ts           hand-mirror of ../lib/schema.js (parity-tested)
 lib/duplicates.ts         repeated applicant_id / email detection
 lib/sheets.ts             all Sheets I/O + the demo dataset
-lib/mailer.ts             all outbound email (SMTP via nodemailer, pooled)
+lib/mailer.ts             Zoho OAuth refresh, Mail API send, live thread reads
+app/api/inbox/route.ts    authenticated, on-demand Zoho message/thread reads
 lib/template.ts           merge fields, HTML validation, template choice, the branded shell
 lib/draft.ts              batch selection, draft prompt, model-output gate
 lib/groq.ts               the only model provider
@@ -51,7 +52,7 @@ All in `app/api/action/route.ts`:
 | `a.sent_at` | Duplicate-send guard. |
 | `validateHtml()` | Rejects malformed or dangerous markup before it can be sent. |
 | `set-email` collision check | Refuses to put one address on two rows, rather than only reporting it later. |
-| `verifyMailer()` in preflight | Opens a real SMTP connection and authenticates, so a green tick means the credentials work — not just that they are set. |
+| `verifyMailer()` in preflight | Refreshes the OAuth token and makes a read-only Zoho mailbox request. It never sends or writes conversation bodies. |
 
 EmailLog is appended **before** the Applicants patch, deliberately: if the sheet
 write fails after a real send, the error says *"the email has already gone out —
@@ -76,8 +77,8 @@ See `.env.example`. Summary:
 | `DASHBOARD_PASSWORD`, `SESSION_SECRET` | Signing in. Always required. |
 | `SHEET_ID`, `GOOGLE_SERVICE_ACCOUNT_JSON` | Real data. Omit both for demo mode. |
 | `GROQ_API_KEY` | Any AI action. |
-| `MAIL_USER`, `MAIL_PASSWORD` | Real sending. Omit either to keep sends logged-only. For Gmail: the address plus a 16-character App Password. |
-| `MAIL_FROM`, `MAIL_HOST`, `MAIL_PORT` | Optional. Display name and server; default `smtp.gmail.com:465`. |
+| `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN` | Server-side OAuth credentials. The authorization code is short-lived and is not used at runtime. |
+| `ZOHO_ACCOUNT_ID`, `ZOHO_FOLDER_ID`, `ZOHO_FROM_ADDRESS` | Zoho mailbox and sender configuration. The API endpoint is the India data center. |
 | `COMPANY_LOGO_BASE_URL` | Only if the email logo isn't served from this deployment. |
 
 ## Adding a column
@@ -98,6 +99,6 @@ column takes down the whole tab, not just the new feature.
 - One shared password rather than per-user sign-in. `lib/auth.ts` is where an
   OAuth provider would slot in.
 - Every page reads whole tabs; no pagination.
-- No reply ingestion — candidates reply to `company_email` and a human reads it.
+- Zoho conversation bodies are fetched on demand and never persisted by this app; the Applicants sheet remains the roster and EmailLog remains the send audit trail.
 - Nothing dedupes the sheet automatically; `lib/duplicates.ts` reports, it never
   deletes. Removing a row is a human decision.

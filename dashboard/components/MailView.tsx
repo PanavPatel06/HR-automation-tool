@@ -1,5 +1,5 @@
 'use client';
-import { useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Row } from '../lib/contract';
 import { isTruthy, ACTIONABLE, STAGES } from '../lib/contract';
@@ -16,6 +16,16 @@ type Compose = { templateId: string; subject: string; html: string; instructions
 const EMPTY_COMPOSE: Compose = { templateId: '', subject: '', html: '', instructions: '', attachments: [] };
 
 type GroupBy = 'none' | 'stage' | 'role' | 'category';
+type MailMessage = {
+  messageId: string; threadId: string; folderId: string; subject: string;
+  fromAddress: string; toAddress: string; summary: string; sentDateInGMT: string;
+  receivedTime: string; status: string; hasAttachment: string; content?: string;
+};
+
+function messageDate(value: string): string {
+  const time = Number(value);
+  return Number.isFinite(time) && time > 0 ? new Date(time).toISOString() : value;
+}
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -46,8 +56,8 @@ async function fileToBase64(file: File): Promise<string> {
  *   - AI only ever fills the compose box; a human still has to press Send.
  *   - Sending is blocked while a literal {{field}} is still visible.
  *
- * Nothing here reads the candidate's mailbox. Their replies arrive in whatever
- * inbox company_email points at, and a human reads them there.
+ * Candidate membership stays in Applicants. Mail and conversation bodies are
+ * fetched live from Zoho and are never written into the spreadsheet.
  */
 export function MailView({ applicants, templates, roles, categories: configCategories, mailerConfigured, dryRun, sendEnabled, loadedAt }: {
   applicants: Row[];
@@ -78,6 +88,13 @@ export function MailView({ applicants, templates, roles, categories: configCateg
   const [showNewContact, setShowNewContact] = useState(false);
   const [newContact, setNewContact] = useState({ name: '', email: '', role: '', category: '', notes: '' });
   const [emailDraft, setEmailDraft] = useState('');
+  const [mailMessages, setMailMessages] = useState<MailMessage[]>([]);
+  const [mailLoading, setMailLoading] = useState(false);
+  const [mailError, setMailError] = useState('');
+  const [activeThreadId, setActiveThreadId] = useState('');
+  const [threadMessages, setThreadMessages] = useState<MailMessage[]>([]);
+  const [threadLoading, setThreadLoading] = useState(false);
+  const [threadError, setThreadError] = useState('');
 
   const activeTemplates = useMemo(() => templates.filter((t) => isTruthy(t.is_active)), [templates]);
 
@@ -136,6 +153,68 @@ export function MailView({ applicants, templates, roles, categories: configCateg
 
   const selected = useMemo(() => applicants.find((a) => a.applicant_id === selectedId) ?? null, [applicants, selectedId]);
 
+  const mailThreads = useMemo(() => {
+    const groups = new Map<string, MailMessage[]>();
+    for (const message of mailMessages) {
+      const id = message.threadId || message.messageId;
+      groups.set(id, [...(groups.get(id) ?? []), message]);
+    }
+    return [...groups.entries()].map(([id, messages]) => ({
+      id,
+      messages,
+      latest: messages[messages.length - 1],
+      subject: messages[messages.length - 1]?.subject || '(no subject)',
+    })).sort((a, b) => Number(b.latest?.sentDateInGMT || b.latest?.receivedTime) - Number(a.latest?.sentDateInGMT || a.latest?.receivedTime));
+  }, [mailMessages]);
+
+  async function loadCandidateMessages(applicantId: string) {
+    setMailLoading(true);
+    setMailError('');
+    setMailMessages([]);
+    setActiveThreadId('');
+    setThreadMessages([]);
+    setThreadError('');
+    try {
+      const response = await fetch(`/api/inbox?applicant_id=${encodeURIComponent(applicantId)}`, { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.hint || payload.message || 'Could not load Zoho messages.');
+      setMailMessages(payload.data ?? []);
+    } catch (err) {
+      setMailError((err as Error).message || 'Could not load Zoho messages.');
+    } finally {
+      setMailLoading(false);
+    }
+  }
+
+  async function loadThread(threadId: string) {
+    if (!selected) return;
+    setActiveThreadId(threadId);
+    setThreadLoading(true);
+    setThreadError('');
+    setThreadMessages([]);
+    try {
+      const response = await fetch(`/api/inbox?applicant_id=${encodeURIComponent(selected.applicant_id)}&thread_id=${encodeURIComponent(threadId)}`, { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.hint || payload.message || 'Could not load this conversation.');
+      setThreadMessages(payload.data ?? []);
+    } catch (err) {
+      setThreadError((err as Error).message || 'Could not load this conversation.');
+    } finally {
+      setThreadLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (selectedId) void loadCandidateMessages(selectedId);
+    else {
+      setMailMessages([]);
+      setActiveThreadId('');
+      setThreadMessages([]);
+    }
+    // Loading is intentionally refreshed on candidate selection only; explicit refresh is available in the panel.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
   const checkedRows = useMemo(() => applicants.filter((a) => checked.has(a.applicant_id)), [applicants, checked]);
   const canDraft = checkedRows.length > 0 && checkedRows.every((r) => ACTIONABLE.draft.includes(r.stage as never));
   const canApprove = checkedRows.length > 0 && checkedRows.every((r) => r.stage === 'DRAFTED');
@@ -156,6 +235,8 @@ export function MailView({ applicants, templates, roles, categories: configCateg
     const row = applicants.find((a) => a.applicant_id === id);
     setCategoryDraft(row?.category ?? '');
     setEmailDraft(row?.email ?? '');
+    setMailError('');
+    setThreadError('');
     clear();
   }
 
@@ -218,11 +299,17 @@ export function MailView({ applicants, templates, roles, categories: configCateg
 
   async function send() {
     if (!selected) return;
+    const lastCandidateMessage = [...threadMessages].reverse().find((message) => message.fromAddress.toLowerCase().includes(selected.email.toLowerCase()));
     const res = await run('send-reply', {
       applicant_id: selected.applicant_id, template_id: compose.templateId, subject: compose.subject, html: compose.html,
+      ...(activeThreadId && lastCandidateMessage ? { reply_message_id: lastCandidateMessage.messageId } : {}),
       attachments: compose.attachments.map(({ filename, mimeType, base64 }) => ({ filename, mimeType, base64 })),
     });
-    if (res.ok) setCompose(EMPTY_COMPOSE);
+    if (res.ok) {
+      setCompose(EMPTY_COMPOSE);
+      await loadCandidateMessages(selected.applicant_id);
+      if (activeThreadId) await loadThread(activeThreadId);
+    }
   }
 
   async function addFiles(fileList: FileList | null) {
@@ -501,8 +588,73 @@ export function MailView({ applicants, templates, roles, categories: configCateg
               ) : null}
             </div>
 
-            {/* The last email we sent, straight from the sheet row. There is no
-                inbound half — candidates reply into a real mailbox, not here. */}
+            <div className="panel" style={{ marginTop: 14 }} aria-live="polite">
+              <div className="toolbar" style={{ marginBottom: 10 }}>
+                <div>
+                  <h2 style={{ margin: 0 }}>Zoho conversations</h2>
+                  <div className="muted" style={{ fontSize: 12 }}>Loaded live for this candidate; message bodies are not saved to Sheets.</div>
+                </div>
+                <span className="spacer" />
+                <button className="sm" disabled={mailLoading} onClick={() => void loadCandidateMessages(selected.applicant_id)}>
+                  {mailLoading ? 'Loading…' : 'Refresh mail'}
+                </button>
+              </div>
+
+              {mailLoading ? (
+                <div className="empty" role="status">Loading Zoho messages… The first request after the service wakes may take a little longer.</div>
+              ) : null}
+              {mailError ? <div className="banner danger"><span>⚠</span><div>{mailError}</div></div> : null}
+              {!mailLoading && !mailError && mailThreads.length === 0 ? (
+                <div className="empty">No Zoho messages found for this email address.</div>
+              ) : null}
+
+              {mailThreads.length ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 0.8fr) minmax(0, 1.6fr)', gap: 12 }}>
+                  <div className="inbox-list" style={{ maxHeight: 360, overflowY: 'auto' }}>
+                    {mailThreads.map((thread) => (
+                      <button
+                        type="button" key={thread.id}
+                        className={`inbox-item-body${thread.id === activeThreadId ? ' active' : ''}`}
+                        style={{ width: '100%', textAlign: 'left', padding: 10 }}
+                        onClick={() => void loadThread(thread.id)}
+                      >
+                        <strong>{thread.subject}</strong>
+                        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                          {thread.messages.length} message(s) · {shortDate(messageDate(thread.latest.sentDateInGMT || thread.latest.receivedTime))}
+                        </div>
+                        <div className="inbox-item-snippet muted">{thread.latest.summary || thread.latest.fromAddress}</div>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div>
+                    {!activeThreadId ? <div className="inbox-empty-pane empty">Select a conversation to load its full messages.</div> : null}
+                    {threadLoading ? <div className="inbox-empty-pane empty" role="status">Loading full conversation from Zoho…</div> : null}
+                    {threadError ? <div className="banner danger"><span>⚠</span><div>{threadError}</div></div> : null}
+                    {!threadLoading && threadMessages.map((message) => (
+                      <article key={message.messageId} className="bubble" style={{ marginBottom: 10, overflow: 'hidden' }}>
+                        <div className="bubble-meta">
+                          <strong>{message.fromAddress || 'Unknown sender'}</strong>
+                          <span className="muted">→ {message.toAddress || 'recipient'}</span>
+                          <span className="spacer" />
+                          <span className="muted">{shortDate(messageDate(message.sentDateInGMT || message.receivedTime))}</span>
+                        </div>
+                        <div className="bubble-subject">{message.subject}</div>
+                        <iframe
+                          title={`Email from ${message.fromAddress || 'unknown sender'}`}
+                          sandbox=""
+                          referrerPolicy="no-referrer"
+                          style={{ width: '100%', minHeight: 180, height: 260, border: 0, background: 'white', borderRadius: 8 }}
+                          srcDoc={`<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>${message.content || '<p>(No message body returned.)</p>'}</body></html>`}
+                        />
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Retained applicant draft/sent snapshot; full mailbox history above is live from Zoho. */}
             {selected.email_html ? (
               <div className="thread">
                 <div className="bubble bubble-sent">
