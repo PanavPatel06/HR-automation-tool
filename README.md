@@ -51,6 +51,59 @@ using the stored OAuth refresh token; secrets never go to the browser.
 | **Branding** | Every email — template or AI-written — is wrapped in the same letterhead shell automatically. |
 | **Observability** | Every failure has a typed code, a plain-English message and a fix. The Console page is the whole debugging surface. |
 
+For the complete operator walkthrough, see the [V2 Feature Guide](docs/V2-FEATURE-GUIDE.md). The quick guide below covers every screen and the normal day-to-day workflows.
+
+## Product features and how to use them
+
+### Inbox — applicant pipeline and email workspace
+
+The Inbox reads the `Applicants` tab and provides:
+
+- Search by candidate name, email, applicant ID, role, or notes; filter by role, stage, and category; and group by role, stage, or category.
+- Pipeline summary cards, duplicate warnings, and a refresh action to reload changes made directly in Sheets.
+- **+ New** to add an applicant, and candidate details to update their email or category.
+- Bulk draft, approve, unapprove, and send actions. The stage flow is `NEW → DRAFTED → APPROVED → SENT`; sending requires human approval.
+- A one-candidate composer for an AI-assisted draft or a template-filled message, with editable subject/body, preview, optional attachments, and send confirmation.
+- Live Zoho conversation summaries and thread bodies for the selected candidate. Bodies are fetched from Zoho when requested and are not stored in Sheets; there is no background reply polling.
+
+**Typical bulk workflow:**
+
+1. Open Inbox, refresh from the sheet, filter/select the intended candidates, and check their addresses.
+2. Click **Generate drafts**. The app chooses the best active template. Templates with `{{ai_body}}` use Groq to write a personalized body; static templates render without that AI call.
+3. Open and review each draft, then select the reviewed candidates and click **Approve**. Use **Unapprove** to return an approved draft to editing.
+4. Confirm the recipient list and send. Only approved, valid, unsent candidates can be sent; unresolved merge fields, disabled sending, missing Zoho setup, and the daily cap block delivery.
+5. Check Console’s Email log and, for live delivery, the Zoho Sent folder.
+
+**One-person workflow:** select a candidate, open their Zoho conversation if needed, enter a plain-English brief, and click **Write with AI**. Alternatively choose **Use template as-is** to fill a template without an AI drafting call. Review and edit the message, preview it, attach files if needed, then send and confirm. When replying to a Zoho thread, the mailbox’s configured Reply-To setting controls where responses are directed.
+
+### Templates — reusable content and attachments
+
+- Generate a template from its purpose/tone, preview it, and activate it only after review. Generated templates start inactive.
+- Edit templates in the `Templates` sheet, use supported `{{merge_fields}}`, and keep exactly one default template for fallback matching.
+- Match templates by role and category; the most specific active match wins.
+- Use `{{ai_body}}` to opt a template into Groq-generated personalization during bulk drafting. Without it, the template is filled deterministically.
+- Add an optional public, unauthenticated attachment URL in a template preview. The file is fetched at send time; total attachment size is limited to 15 MiB.
+
+### Console — diagnostics and email audit
+
+- Click **Run preflight** to check configured credentials, required Config values, mailbox connectivity when live sending is enabled, duplicate IDs/emails, and email syntax. Preflight does not send an email or write conversation bodies.
+- Review recent attempts in **Email log**, including dry-run/failed status and Zoho message IDs. Check Zoho Sent before retrying an uncertain send.
+
+### Settings — switches and branding
+
+- Turn drafting and sending on/off. Sending must be enabled before delivery is possible.
+- Keep **Dry run** on during setup. Turning it off allows approved messages to reach real recipients when sending is enabled and Zoho is configured.
+- Review company/HR branding and limits. Most branding values are edited in the spreadsheet’s `Config` tab; the deployed `/brand/logo.png` is the default email logo.
+- Set or verify the sender’s Reply-To in Zoho Mail settings. The app does not add a per-message Reply-To property to the Zoho send request.
+
+### Applicant intake and spreadsheet data
+
+- Add a candidate in Inbox, type/paste rows into `Applicants`, or connect a Google Form response tab to `Applicants` with a validated Apps Script bridge. Form responses do not automatically become Applicants rows in this version.
+- Keep the sheet headers exactly as defined by the schema. The app uses `Applicants` as the roster, `Templates` for reusable messages, `Config` for settings/branding, and `EmailLog` as the send-attempt audit trail.
+- The app can edit candidate email/category and pipeline fields; make other roster changes in Sheets, then refresh Inbox. Do not manually edit `EmailLog`.
+
+> **Dry-run warning:** in the current version, a dry-run send is not delivered, but it is logged and advances the selected applicant to `SENT`. Use a dedicated test applicant for dry-run rehearsals; do not rehearse against a real candidate row. Dry-run entries also count toward the app-side daily send cap.
+
 ---
 
 ## Requirements
@@ -135,7 +188,7 @@ types stay right. The ones that matter:
 | `toggle_send` | `false` | Master switch for sending. |
 | `toggle_draft` | `true` | Master switch for AI drafting. |
 | `send_daily_cap` | `400` | App-side safety ceiling; set below the connected Zoho Mail plan limit. |
-| `company_email` | — | **Where candidates' replies go.** Set this to a mailbox you actually read. |
+| `company_email` | — | Company contact/branding value used in templates. Configure actual Reply-To routing in the Zoho mailbox’s Send Mail As settings. |
 | `company_name`, `hr_name`, `hr_signature` | — | Merge fields. |
 | `company_phone`, `company_incubator`, `company_logo_url` | — | The letterhead block. |
 | `categories` | `Intern,Junior,Mid,Senior,Lead` | Suggestions for the category box. |
@@ -270,13 +323,13 @@ quiet spell takes ~30 seconds. Fine for an internal tool; upgrade if it annoys.
 
 On the **Console** page, click **Run preflight**. Every check must pass.
 
-Then, with `dry_run` still ON:
+Then, with `dry_run` still ON, use a dedicated test applicant (dry-run marks it `SENT` even though no email is delivered):
 
 1. Add yourself as a candidate.
 2. Draft and send. Nothing is delivered; a row appears in the Email Log marked
    *dry run*.
 
-Then go live:
+Then go live, using a separate test applicant for the controlled real-send check:
 
 1. Settings → turn **Sending** on.
 2. Settings → turn **dry run** off.
