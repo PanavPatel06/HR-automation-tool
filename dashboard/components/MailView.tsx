@@ -19,7 +19,7 @@ type GroupBy = 'none' | 'stage' | 'role' | 'category';
 type MailMessage = {
   messageId: string; threadId: string; folderId: string; subject: string;
   fromAddress: string; toAddress: string; summary: string; sentDateInGMT: string;
-  receivedTime: string; status: string; hasAttachment: string; content?: string;
+  receivedTime: string; status: string; hasAttachment: string; content?: string; contentError?: string;
 };
 
 function messageDate(value: string): string {
@@ -631,6 +631,9 @@ export function MailView({ applicants, templates, roles, categories: configCateg
                     {!activeThreadId ? <div className="inbox-empty-pane empty">Select a conversation to load its full messages.</div> : null}
                     {threadLoading ? <div className="inbox-empty-pane empty" role="status">Loading full conversation from Zoho…</div> : null}
                     {threadError ? <div className="banner danger"><span>⚠</span><div>{threadError}</div></div> : null}
+                    {!threadLoading && !threadError && threadMessages.length === 0 && activeThreadId ? (
+                      <div className="inbox-empty-pane empty">Zoho returned no messages for this conversation. Refresh the mail list and try again.</div>
+                    ) : null}
                     {!threadLoading && threadMessages.map((message) => (
                       <article key={message.messageId} className="bubble" style={{ marginBottom: 10, overflow: 'hidden' }}>
                         <div className="bubble-meta">
@@ -640,12 +643,15 @@ export function MailView({ applicants, templates, roles, categories: configCateg
                           <span className="muted">{shortDate(messageDate(message.sentDateInGMT || message.receivedTime))}</span>
                         </div>
                         <div className="bubble-subject">{message.subject}</div>
+                        {message.contentError ? (
+                          <div className="banner warn" role="status"><span>!</span><div>Message details could not be loaded: {message.contentError}</div></div>
+                        ) : null}
                         <iframe
                           title={`Email from ${message.fromAddress || 'unknown sender'}`}
                           sandbox=""
                           referrerPolicy="no-referrer"
                           style={{ width: '100%', minHeight: 180, height: 260, border: 0, background: 'white', borderRadius: 8 }}
-                          srcDoc={`<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>${message.content || '<p>(No message body returned.)</p>'}</body></html>`}
+                          srcDoc={`<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>${message.content || (message.contentError ? '<p>(Message body unavailable.)</p>' : '<p>(No message body returned.)</p>')}</body></html>`}
                         />
                       </article>
                     ))}

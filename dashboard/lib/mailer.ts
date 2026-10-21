@@ -30,7 +30,7 @@ export type ZohoMessageSummary = {
   hasAttachment: string;
 };
 
-export type ZohoConversationMessage = ZohoMessageSummary & { content: string };
+export type ZohoConversationMessage = ZohoMessageSummary & { content: string; contentError?: string };
 
 type ZohoEnvelope<T> = { status?: { code?: number; description?: string }; data?: T; message?: string; error?: string };
 type ZohoAttachmentRef = { storeName: string; attachmentPath: string; attachmentName: string };
@@ -180,9 +180,13 @@ function arrayData<T>(payload: ZohoEnvelope<T[]>, action: string): T[] {
 }
 
 function normalizeMessage(raw: Record<string, unknown>): ZohoMessageSummary {
+  const rawThreadId = String(raw.threadId ?? '').trim();
+  // Zoho uses 0 for messages without a thread. Treat each one as its own
+  // conversation instead of grouping every standalone message under "0".
+  const threadId = rawThreadId && rawThreadId !== '0' ? rawThreadId : String(raw.messageId ?? '');
   return {
     messageId: String(raw.messageId ?? ''),
-    threadId: String(raw.threadId ?? raw.messageId ?? ''),
+    threadId,
     folderId: String(raw.folderId ?? ''),
     subject: String(raw.subject ?? '(no subject)'),
     fromAddress: String(raw.fromAddress ?? ''),
@@ -195,65 +199,88 @@ function normalizeMessage(raw: Record<string, unknown>): ZohoMessageSummary {
   };
 }
 
-/**
- * Metadata is fetched on candidate selection; message bodies are fetched only
- * when a thread is opened. Use the documented folder-list endpoint here,
- * which is also exercised by preflight. The search endpoint can reject a
- * syntactically valid sender/to OR search as "Invalid Input" for some Mail
- * accounts, making inbox reads fail while preflight succeeds.
- */
+/** Metadata is fetched on candidate selection; bodies are fetched on demand. */
 export async function listCandidateMessages(email: string): Promise<ZohoMessageSummary[]> {
   const normalizedEmail = email.trim().toLowerCase();
   if (!normalizedEmail) return [];
-  const results: ZohoMessageSummary[] = [];
   const pageSize = 200;
-  const maxMessages = 2000;
+  const results = new Map<string, ZohoMessageSummary>();
+  const searchKey = `sender:${normalizedEmail}::or:to:${normalizedEmail}`;
 
-  for (let start = 1; start <= maxMessages; start += pageSize) {
-    const query = new URLSearchParams({
-      folderId: config().folderId,
-      start: String(start),
-      limit: String(pageSize),
-      includeto: 'true',
-      includesent: 'true',
-    });
-    const payload = await zohoRequest<ZohoEnvelope<Record<string, unknown>[]>>(`/messages/view?${query}`);
-    const rows = arrayData(payload, 'listing candidate messages').map(normalizeMessage);
-    results.push(...rows.filter((message) =>
-      message.fromAddress.toLowerCase().includes(normalizedEmail)
-      || message.toAddress.toLowerCase().includes(normalizedEmail),
-    ));
-    if (rows.length < pageSize) break;
+  const search = async (key: string) => {
+    const found = new Map<string, ZohoMessageSummary>();
+    for (let start = 1; ; start += pageSize) {
+      const query = new URLSearchParams({
+        searchKey: key,
+        receivedTime: String(Date.now()),
+        start: String(start),
+        limit: String(pageSize),
+        includeto: 'true',
+      });
+      const payload = await zohoRequest<ZohoEnvelope<Record<string, unknown>[]>>(`/messages/search?${query}`);
+      const rows = arrayData(payload, 'searching candidate messages').map(normalizeMessage);
+      const before = found.size;
+      for (const message of rows) if (message.messageId) found.set(message.messageId, message);
+      if (rows.length < pageSize || found.size === before) break;
+    }
+    return found;
+  };
+
+  let useFolderFallback = false;
+  try {
+    // Search spans folders, so it can find old replies even when the configured
+    // folder is Inbox. receivedTime is explicit because Zoho otherwise defaults
+    // to mail received before the last two minutes.
+    for (const message of (await search(searchKey)).values()) results.set(message.messageId, message);
+  } catch (err) {
+    if (!(err instanceof MailerError) || !['E-ZOHO-API', 'E-ZOHO-RESPONSE'].includes(err.code)) throw err;
+    // Some Mail accounts reject Zoho's documented OR search. Try each side
+    // separately before resorting to the configured folder.
+    try {
+      for (const key of [`sender:${normalizedEmail}`, `to:${normalizedEmail}`]) {
+        for (const message of (await search(key)).values()) results.set(message.messageId, message);
+      }
+    } catch (splitErr) {
+      if (!(splitErr instanceof MailerError) || !['E-ZOHO-API', 'E-ZOHO-RESPONSE'].includes(splitErr.code)) throw splitErr;
+      results.clear();
+      useFolderFallback = true;
+    }
   }
 
-  const unique = new Map<string, ZohoMessageSummary>();
-  for (const message of results) {
-    if (message.messageId) unique.set(message.messageId, message);
+  if (useFolderFallback) {
+    // Compatibility path for Zoho accounts that reject all search forms.
+    const maxMessages = 2000;
+    for (let start = 1; start <= maxMessages; start += pageSize) {
+      const query = new URLSearchParams({
+        folderId: config().folderId,
+        start: String(start),
+        limit: String(pageSize),
+        includeto: 'true',
+        includesent: 'true',
+        includearchive: 'true',
+      });
+      const payload = await zohoRequest<ZohoEnvelope<Record<string, unknown>[]>>(`/messages/view?${query}`);
+      const rows = arrayData(payload, 'listing candidate messages').map(normalizeMessage);
+      for (const message of rows) {
+        if (message.messageId && (
+          message.fromAddress.toLowerCase().includes(normalizedEmail)
+          || message.toAddress.toLowerCase().includes(normalizedEmail)
+        )) results.set(message.messageId, message);
+      }
+      if (rows.length < pageSize) break;
+    }
   }
-  return [...unique.values()].sort((a, b) => Number(a.sentDateInGMT || a.receivedTime) - Number(b.sentDateInGMT || b.receivedTime));
+  return [...results.values()].sort((a, b) => Number(a.sentDateInGMT || a.receivedTime) - Number(b.sentDateInGMT || b.receivedTime));
 }
 
 export async function getConversation(email: string, threadId: string): Promise<ZohoConversationMessage[]> {
   if (!threadId || threadId.length > 100) throw new MailerError('E-ZOHO-THREAD', 'Invalid Zoho thread ID.', 'Refresh the Inbox and open the conversation again.');
-  // Zoho supports filtering the folder listing by threadId. Use it directly
-  // here rather than scanning the mailbox again (up to 2,000 messages) every
-  // time a conversation is opened.
-  const query = new URLSearchParams({
-    folderId: config().folderId,
-    threadId,
-    start: '1',
-    limit: '200',
-    includeto: 'true',
-    includesent: 'true',
-  });
-  const payload = await zohoRequest<ZohoEnvelope<Record<string, unknown>[]>>(`/messages/view?${query}`);
-  const normalizedEmail = email.trim().toLowerCase();
-  const messages = arrayData(payload, 'listing conversation messages')
-    .map(normalizeMessage)
-    .filter((message) => message.threadId === threadId && (
-      message.fromAddress.toLowerCase().includes(normalizedEmail)
-      || message.toAddress.toLowerCase().includes(normalizedEmail)
-    ));
+  // The message search includes the candidate's mail across folders. Looking
+  // the thread up only inside ZOHO_FOLDER_ID silently omitted replies moved to
+  // Sent, Archive, or a custom folder.
+  const messages = (await listCandidateMessages(email))
+    .filter((message) => message.threadId === threadId)
+    .sort((a, b) => Number(a.sentDateInGMT || a.receivedTime) - Number(b.sentDateInGMT || b.receivedTime));
   if (!messages.length) return [];
 
   const withContent: ZohoConversationMessage[] = [];
@@ -261,14 +288,22 @@ export async function getConversation(email: string, threadId: string): Promise<
   for (let i = 0; i < messages.length; i += 5) {
     const batch = messages.slice(i, i + 5);
     const bodies = await Promise.all(batch.map(async (message) => {
-      if (!message.folderId || !message.messageId) return '';
-      const query = new URLSearchParams({ includeBlockContent: 'false' });
-      const payload = await zohoRequest<ZohoEnvelope<{ content?: string }>>(
-        `/folders/${encodeURIComponent(message.folderId)}/messages/${encodeURIComponent(message.messageId)}/content?${query}`,
-      );
-      return typeof payload.data?.content === 'string' ? payload.data.content : '';
+      if (!message.folderId || !message.messageId) return { content: '', contentError: 'Zoho did not return this message’s folder and ID.' };
+      try {
+        // Include quoted blocks so each reply can show the full email context
+        // that Zoho has for it, as well as the separate messages in the thread.
+        const query = new URLSearchParams({ includeBlockContent: 'true' });
+        const payload = await zohoRequest<ZohoEnvelope<{ content?: string }>>(
+          `/folders/${encodeURIComponent(message.folderId)}/messages/${encodeURIComponent(message.messageId)}/content?${query}`,
+        );
+        return { content: typeof payload.data?.content === 'string' ? payload.data.content : '' };
+      } catch (err) {
+        // A single moved or unavailable message must not hide the rest of the
+        // conversation from the operator.
+        return { content: '', contentError: (err as Error).message || 'Could not load this message body.' };
+      }
     }));
-    batch.forEach((message, index) => withContent.push({ ...message, content: bodies[index] }));
+    batch.forEach((message, index) => withContent.push({ ...message, ...bodies[index] }));
   }
   return withContent;
 }
