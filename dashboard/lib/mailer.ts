@@ -235,7 +235,25 @@ export async function listCandidateMessages(email: string): Promise<ZohoMessageS
 
 export async function getConversation(email: string, threadId: string): Promise<ZohoConversationMessage[]> {
   if (!threadId || threadId.length > 100) throw new MailerError('E-ZOHO-THREAD', 'Invalid Zoho thread ID.', 'Refresh the Inbox and open the conversation again.');
-  const messages = (await listCandidateMessages(email)).filter((message) => message.threadId === threadId);
+  // Zoho supports filtering the folder listing by threadId. Use it directly
+  // here rather than scanning the mailbox again (up to 2,000 messages) every
+  // time a conversation is opened.
+  const query = new URLSearchParams({
+    folderId: config().folderId,
+    threadId,
+    start: '1',
+    limit: '200',
+    includeto: 'true',
+    includesent: 'true',
+  });
+  const payload = await zohoRequest<ZohoEnvelope<Record<string, unknown>[]>>(`/messages/view?${query}`);
+  const normalizedEmail = email.trim().toLowerCase();
+  const messages = arrayData(payload, 'listing conversation messages')
+    .map(normalizeMessage)
+    .filter((message) => message.threadId === threadId && (
+      message.fromAddress.toLowerCase().includes(normalizedEmail)
+      || message.toAddress.toLowerCase().includes(normalizedEmail)
+    ));
   if (!messages.length) return [];
 
   const withContent: ZohoConversationMessage[] = [];
@@ -256,6 +274,10 @@ export async function getConversation(email: string, threadId: string): Promise<
 }
 
 async function uploadAttachment(attachment: OutgoingAttachment): Promise<ZohoAttachmentRef> {
+  return uploadAttachmentWithRetry(attachment, false);
+}
+
+async function uploadAttachmentWithRetry(attachment: OutgoingAttachment, retry: boolean): Promise<ZohoAttachmentRef> {
   const credentials = config();
   const token = await getAccessToken();
   const query = new URLSearchParams({ fileName: attachment.filename, isInline: 'false' });
@@ -271,9 +293,16 @@ async function uploadAttachment(attachment: OutgoingAttachment): Promise<ZohoAtt
   } catch (err) {
     throw new MailerError('E-ZOHO-ATTACHMENT', `Could not upload ${attachment.filename}: ${(err as Error)?.message ?? String(err)}`, 'Try again with a smaller attachment.');
   }
+  if (response.status === 401 && !retry) {
+    accessToken = null;
+    tokenExpiresAt = 0;
+    await getAccessToken(true);
+    return uploadAttachmentWithRetry(attachment, true);
+  }
   const payload = await response.json().catch(() => ({})) as ZohoEnvelope<ZohoAttachmentRef>;
   if (!response.ok || !payload.data?.storeName || !payload.data.attachmentPath || !payload.data.attachmentName) {
-    throw new MailerError('E-ZOHO-ATTACHMENT', `Zoho rejected attachment ${attachment.filename}.`, payload.status?.description || 'Check the attachment size and the Zoho CREATE scope.');
+    const detail = payload.status?.description || payload.message || payload.error || `HTTP ${response.status}`;
+    throw new MailerError('E-ZOHO-ATTACHMENT', `Zoho rejected attachment ${attachment.filename}: ${detail}`, 'Check the attachment size and confirm the Zoho token has the ZohoMail.messages.CREATE scope.');
   }
   return payload.data;
 }
@@ -282,7 +311,7 @@ export async function sendMail(args: {
   to: string; subject: string; html: string; attachments?: OutgoingAttachment[];
 }): Promise<{ id: string }> {
   const attachments = args.attachments ?? [];
-  const totalSize = attachments.reduce((n, a) => n + Buffer.from(a.base64, 'base64').length, 0);
+  const totalSize = attachments.reduce((n, a) => n + Buffer.from(a.base64, 'base64').byteLength, 0);
   if (totalSize > MAX_ATTACHMENTS_BYTES) throw new MailerError('E-VALIDATION', 'Attachments are too large.', `Total attachment size must stay under ${Math.round(MAX_ATTACHMENTS_BYTES / 1024 / 1024)}MB.`);
 
   const uploaded = await Promise.all(attachments.map(uploadAttachment));

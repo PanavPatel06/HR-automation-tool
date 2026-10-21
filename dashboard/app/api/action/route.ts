@@ -283,7 +283,17 @@ export async function POST(req: Request) {
         const template = templates.find((t) => t.template_id === templateId);
         if (template?.attachment_url) attachments.push(await fetchUrlAttachment(template.attachment_url, template.attachment_name));
       }
-      const totalAttachmentBytes = attachments.reduce((n, a) => n + (a.base64?.length ?? 0), 0);
+      const invalidAttachment = attachments.find((a) =>
+        !a || typeof a.filename !== 'string' || !a.filename.trim()
+        || typeof a.mimeType !== 'string' || typeof a.base64 !== 'string'
+        || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(a.base64),
+      );
+      if (invalidAttachment) {
+        return fail(400, 'E-ATTACHMENT', 'An attachment is invalid.', 'Choose the file again and retry.');
+      }
+      // Base64 is about one third larger than the original file. Enforce the
+      // limit on decoded bytes so the UI and server agree on the 15 MiB cap.
+      const totalAttachmentBytes = attachments.reduce((n, a) => n + Buffer.from(a.base64, 'base64').byteLength, 0);
       if (totalAttachmentBytes > MAX_ATTACHMENTS_BYTES) {
         return fail(413, 'E-VALIDATION', 'Attachments are too large.', `Total attachment size must stay under ${Math.round(MAX_ATTACHMENTS_BYTES / 1024 / 1024)}MB.`);
       }
