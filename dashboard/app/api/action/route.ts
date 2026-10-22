@@ -236,8 +236,16 @@ export async function POST(req: Request) {
       const applicantId = String(body.applicant_id ?? '').trim();
       const subject = String(body.subject ?? '').trim();
       const html = String(body.html ?? '').trim();
+      const messageMode = String(body.message_mode ?? (body.reply_message_id ? 'reply' : 'new'));
+      const replyMessageId = String(body.reply_message_id ?? '').trim();
       if (!applicantId) return fail(400, 'E-BADREQ', 'No applicant selected.');
       if (!subject || !html) return fail(400, 'E-BADREQ', 'Subject and message body are required.');
+      if (messageMode !== 'new' && messageMode !== 'reply') {
+        return fail(400, 'E-BADREQ', 'Choose whether to send a new email or reply to a conversation.');
+      }
+      if (messageMode === 'reply' && !replyMessageId) {
+        return fail(400, 'E-BADREQ', 'Choose a response to reply to first.');
+      }
 
       const structure = validateHtml(html);
       if (!structure.ok) return fail(422, 'E-MAIL-TEMPLATE', `Message HTML is invalid: ${structure.problems.join(' ')}`, 'Fix the HTML and try again.');
@@ -283,6 +291,9 @@ export async function POST(req: Request) {
         const template = templates.find((t) => t.template_id === templateId);
         if (template?.attachment_url) attachments.push(await fetchUrlAttachment(template.attachment_url, template.attachment_name));
       }
+      if (messageMode === 'reply' && attachments.length > 0) {
+        return fail(422, 'E-REPLY-ATTACHMENT', 'Zoho reply mode does not currently support attachments.', 'Remove the attachment or switch to New email.');
+      }
       const invalidAttachment = attachments.find((a) =>
         !a || typeof a.filename !== 'string' || !a.filename.trim()
         || typeof a.mimeType !== 'string' || typeof a.base64 !== 'string'
@@ -300,8 +311,7 @@ export async function POST(req: Request) {
 
       let providerMessageId = '';
       if (willSendForReal) {
-        const replyMessageId = String(body.reply_message_id ?? '').trim();
-        const sent = replyMessageId && attachments.length === 0
+        const sent = messageMode === 'reply'
           ? await sendReply({ messageId: replyMessageId, to: applicant.email, subject, html })
           : await sendMail({ to: applicant.email, subject, html, attachments });
         providerMessageId = sent.id;

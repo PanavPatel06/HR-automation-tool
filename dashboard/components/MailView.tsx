@@ -16,6 +16,7 @@ type Compose = { templateId: string; subject: string; html: string; instructions
 const EMPTY_COMPOSE: Compose = { templateId: '', subject: '', html: '', instructions: '', attachments: [] };
 
 type GroupBy = 'none' | 'stage' | 'role' | 'category';
+type ComposeMode = 'new' | 'reply';
 type MailMessage = {
   messageId: string; threadId: string; folderId: string; subject: string;
   fromAddress: string; toAddress: string; summary: string; sentDateInGMT: string;
@@ -81,6 +82,7 @@ export function MailView({ applicants, templates, roles, categories: configCateg
   const [category, setCategory] = useState('');
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
   const [confirmSend, setConfirmSend] = useState(false);
+  const [composeMode, setComposeMode] = useState<ComposeMode>('new');
   const [compose, setCompose] = useState<Compose>(EMPTY_COMPOSE);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [categoryDraft, setCategoryDraft] = useState('');
@@ -97,6 +99,7 @@ export function MailView({ applicants, templates, roles, categories: configCateg
   const [threadError, setThreadError] = useState('');
 
   const activeTemplates = useMemo(() => templates.filter((t) => isTruthy(t.is_active)), [templates]);
+  const selectedTemplate = useMemo(() => activeTemplates.find((t) => t.template_id === compose.templateId), [activeTemplates, compose.templateId]);
 
   // Redundancy in the sheet. A repeated applicant_id makes every action target
   // the first matching row silently, so it is worth surfacing where the rows
@@ -152,6 +155,13 @@ export function MailView({ applicants, templates, roles, categories: configCateg
   }, [list, groupBy]);
 
   const selected = useMemo(() => applicants.find((a) => a.applicant_id === selectedId) ?? null, [applicants, selectedId]);
+
+  const replyTarget = useMemo(() => {
+    if (!selected?.email) return null;
+    return [...threadMessages].reverse().find((message) =>
+      message.fromAddress.toLowerCase().includes(selected.email.toLowerCase()),
+    ) ?? null;
+  }, [selected, threadMessages]);
 
   const mailThreads = useMemo(() => {
     const groups = new Map<string, MailMessage[]>();
@@ -230,6 +240,7 @@ export function MailView({ applicants, templates, roles, categories: configCateg
 
   function select(id: string) {
     setSelectedId(id);
+    setComposeMode('new');
     setCompose(EMPTY_COMPOSE);
     setAttachError(null);
     const row = applicants.find((a) => a.applicant_id === id);
@@ -299,14 +310,16 @@ export function MailView({ applicants, templates, roles, categories: configCateg
 
   async function send() {
     if (!selected) return;
-    const lastCandidateMessage = [...threadMessages].reverse().find((message) => message.fromAddress.toLowerCase().includes(selected.email.toLowerCase()));
+    if (composeMode === 'reply' && !replyTarget) return;
     const res = await run('send-reply', {
       applicant_id: selected.applicant_id, template_id: compose.templateId, subject: compose.subject, html: compose.html,
-      ...(activeThreadId && lastCandidateMessage ? { reply_message_id: lastCandidateMessage.messageId } : {}),
+      message_mode: composeMode,
+      ...(composeMode === 'reply' && replyTarget ? { reply_message_id: replyTarget.messageId } : {}),
       attachments: compose.attachments.map(({ filename, mimeType, base64 }) => ({ filename, mimeType, base64 })),
     });
     if (res.ok) {
       setCompose(EMPTY_COMPOSE);
+      setComposeMode('new');
       await loadCandidateMessages(selected.applicant_id);
       if (activeThreadId) await loadThread(activeThreadId);
     }
@@ -337,6 +350,9 @@ export function MailView({ applicants, templates, roles, categories: configCateg
   // sendEnabled is the Settings master switch. Enforced server-side as well;
   // this only saves the round trip.
   const canSendReply = Boolean(compose.subject.trim() && compose.html.trim() && !hasPlaceholder && sendEnabled && !sendingBroken);
+  const canReply = Boolean(activeThreadId && replyTarget && !threadLoading);
+  const replyAttachmentUnsupported = composeMode === 'reply'
+    && (compose.attachments.length > 0 || Boolean(selectedTemplate?.attachment_url));
   // The model needs something to go on: either a brief, or a template to
   // rewrite. Matches the server-side check in reply-ai-draft.
   const canWriteWithAI = Boolean(compose.instructions.trim() || compose.templateId);
@@ -688,6 +704,37 @@ export function MailView({ applicants, templates, roles, categories: configCateg
                   : ' Email sending is not configured and dry run is on — this will be simulated, not delivered.'}
               </p>
 
+              <fieldset style={{ border: 0, padding: 0, margin: '0 0 16px' }}>
+                <legend className="muted" style={{ marginBottom: 6, fontSize: 13 }}>Message type</legend>
+                <div className="toolbar" role="group" aria-label="Choose whether to send a new email or reply">
+                  <button
+                    type="button" className={composeMode === 'new' ? 'primary sm' : 'sm'}
+                    aria-pressed={composeMode === 'new'} disabled={busy !== null}
+                    onClick={() => setComposeMode('new')}
+                  >New email</button>
+                  <button
+                    type="button" className={composeMode === 'reply' ? 'primary sm' : 'sm'}
+                    aria-pressed={composeMode === 'reply'} disabled={busy !== null || !canReply}
+                    title={canReply ? `Reply to ${replyTarget?.fromAddress}` : 'Open a conversation with a response from this candidate first'}
+                    onClick={() => setComposeMode('reply')}
+                  >Reply to response</button>
+                </div>
+                {composeMode === 'reply' && replyTarget ? (
+                  <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                    Replying to “{replyTarget.subject}” from {replyTarget.fromAddress}.
+                  </div>
+                ) : composeMode === 'reply' ? (
+                  <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                    Open a conversation containing a response from this candidate to enable replies.
+                  </div>
+                ) : null}
+                {replyAttachmentUnsupported ? (
+                  <div className="banner warn" style={{ marginTop: 8 }}>
+                    <span>!</span><div>Zoho reply mode does not support attachments here. Remove the attachment or switch to New email.</div>
+                  </div>
+                ) : null}
+              </fieldset>
+
               <label style={{ display: 'block', marginBottom: 12 }}>
                 <div className="muted" style={{ marginBottom: 4 }}>What should this email say?</div>
                 <textarea
@@ -770,10 +817,10 @@ export function MailView({ applicants, templates, roles, categories: configCateg
               <div className="toolbar" style={{ marginTop: 14 }}>
                 <button
                   className={willSendForReal ? 'danger' : 'primary'}
-                  disabled={!canSendReply || busy !== null} onClick={send}
+                  disabled={!canSendReply || busy !== null || (composeMode === 'reply' && (!canReply || replyAttachmentUnsupported))} onClick={send}
                   title={!sendEnabled ? 'Sending is switched off in Settings' : undefined}
                 >
-                  {busy === 'send-reply' ? 'Sending…' : willSendForReal ? 'Send for real' : 'Send'}
+                  {busy === 'send-reply' ? 'Sending…' : composeMode === 'reply' ? (willSendForReal ? 'Send reply for real' : 'Send reply') : (willSendForReal ? 'Send new email for real' : 'Send new email')}
                 </button>
                 {!sendEnabled ? <span className="muted" style={{ fontSize: 12 }}>Sending is off in Settings.</span> : null}
               </div>
