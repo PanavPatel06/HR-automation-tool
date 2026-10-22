@@ -47,11 +47,10 @@ async function fileToBase64(file: File): Promise<string> {
  * The whole app: the candidate list on the left (from the Applicants tab),
  * and on the right the message you are about to send them.
  *
- * The composer's centre of gravity is the instructions box. You pick a
- * candidate, say what the email should cover in plain English, and the model
- * writes it — their name, role and category come from their sheet row, so you
- * never type those. A template is optional, either as a starting point or as a
- * style reference for the model.
+ * For new email, you describe what it should cover and the model writes it.
+ * For replies, the candidate's latest email supplies the context; extra
+ * guidance is optional. Their name, role and category come from the sheet.
+ * A template can guide either mode.
  *
  * Two rules hold whichever way the message got written:
  *   - AI only ever fills the compose box; a human still has to press Send.
@@ -304,6 +303,14 @@ export function MailView({ applicants, templates, roles, categories: configCateg
     if (!selected) return;
     const res = await run('reply-ai-draft', {
       applicant_id: selected.applicant_id, template_id: compose.templateId, instructions: compose.instructions,
+      message_mode: composeMode,
+      ...(composeMode === 'reply' && replyTarget ? {
+        reply_context: {
+          subject: replyTarget.subject,
+          from: replyTarget.fromAddress,
+          content: replyTarget.content,
+        },
+      } : {}),
     });
     if (res.ok && res.result) setCompose((c) => ({ ...c, subject: res.result?.subject ?? c.subject, html: res.result?.html ?? c.html }));
   }
@@ -353,9 +360,11 @@ export function MailView({ applicants, templates, roles, categories: configCateg
   const canReply = Boolean(activeThreadId && replyTarget && !threadLoading);
   const replyAttachmentUnsupported = composeMode === 'reply'
     && (compose.attachments.length > 0 || Boolean(selectedTemplate?.attachment_url));
-  // The model needs something to go on: either a brief, or a template to
-  // rewrite. Matches the server-side check in reply-ai-draft.
-  const canWriteWithAI = Boolean(compose.instructions.trim() || compose.templateId);
+  // In reply mode the incoming email itself is the prompt, so instructions
+  // and templates are optional. New emails still need a brief or template.
+  const canWriteWithAI = composeMode === 'reply'
+    ? Boolean(replyTarget?.content?.trim())
+    : Boolean(compose.instructions.trim() || compose.templateId);
 
   return (
     <>
@@ -736,18 +745,22 @@ export function MailView({ applicants, templates, roles, categories: configCateg
               </fieldset>
 
               <label style={{ display: 'block', marginBottom: 12 }}>
-                <div className="muted" style={{ marginBottom: 4 }}>What should this email say?</div>
+                <div className="muted" style={{ marginBottom: 4 }}>
+                  {composeMode === 'reply' ? 'Guidance for your reply (optional)' : 'What should this email say?'}
+                </div>
                 <textarea
                   rows={3} value={compose.instructions}
                   onChange={(e) => setCompose((c) => ({ ...c, instructions: e.target.value }))}
-                  placeholder={`e.g. invite ${selected.name?.split(' ')[0] || 'them'} to a 30-minute intro call next week, mention it is remote, ask for two time slots`}
+                  placeholder={composeMode === 'reply'
+                    ? 'Optional: add guidance for the response. Leave blank to draft a reply based on the candidate’s email.'
+                    : `e.g. invite ${selected.name?.split(' ')[0] || 'them'} to a 30-minute intro call next week, mention it is remote, ask for two time slots`}
                 />
               </label>
 
               <label style={{ display: 'block', marginBottom: 12 }}>
                 <div className="muted" style={{ marginBottom: 4 }}>Base it on a template (optional)</div>
                 <select style={{ width: '100%' }} value={compose.templateId} onChange={(e) => setCompose((c) => ({ ...c, templateId: e.target.value }))}>
-                  <option value="">No template — write from the instructions alone</option>
+                  <option value="">{composeMode === 'reply' ? 'No template — respond to the candidate’s email' : 'No template — write from the instructions alone'}</option>
                   {activeTemplates.map((t) => (
                     <option key={t.template_id} value={t.template_id}>{t.name}{t.job_role ? ` — ${t.job_role}` : ''}</option>
                   ))}
@@ -757,7 +770,9 @@ export function MailView({ applicants, templates, roles, categories: configCateg
               <div className="toolbar">
                 <button
                   className="primary" disabled={busy !== null || !canWriteWithAI} onClick={writeWithAI}
-                  title={canWriteWithAI ? undefined : 'Type what the email should say, or pick a template'}
+                  title={canWriteWithAI ? undefined : composeMode === 'reply'
+                    ? 'Load the candidate’s email body to enable AI replies'
+                    : 'Type what the email should say, or pick a template'}
                 >
                   {busy === 'reply-ai-draft' ? 'Writing…' : '✨ Write with AI'}
                 </button>
