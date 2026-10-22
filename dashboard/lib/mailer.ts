@@ -308,38 +308,49 @@ export async function getConversation(email: string, threadId: string): Promise<
   return withContent;
 }
 
-async function uploadAttachment(attachment: OutgoingAttachment): Promise<ZohoAttachmentRef> {
-  return uploadAttachmentWithRetry(attachment, false);
+async function uploadAttachments(attachments: OutgoingAttachment[]): Promise<ZohoAttachmentRef[]> {
+  if (!attachments.length) return [];
+  return uploadAttachmentsWithRetry(attachments, false);
 }
 
-async function uploadAttachmentWithRetry(attachment: OutgoingAttachment, retry: boolean): Promise<ZohoAttachmentRef> {
+async function uploadAttachmentsWithRetry(attachments: OutgoingAttachment[], retry: boolean): Promise<ZohoAttachmentRef[]> {
   const credentials = config();
   const token = await getAccessToken();
-  const query = new URLSearchParams({ fileName: attachment.filename, isInline: 'false' });
+  const query = new URLSearchParams({ uploadType: 'multipart', isInline: 'false' });
+  const form = new FormData();
+  for (const attachment of attachments) {
+    const bytes = Uint8Array.from(Buffer.from(attachment.base64, 'base64'));
+    const file = new Blob([bytes], { type: attachment.mimeType || 'application/octet-stream' });
+    form.append('attach', file, attachment.filename);
+  }
+
   let response: Response;
   try {
     response = await fetch(`${API_BASE}/${credentials.accountId}/messages/attachments?${query}`, {
       method: 'POST',
-      headers: { Authorization: `Zoho-oauthtoken ${token}`, 'Content-Type': attachment.mimeType || 'application/octet-stream' },
-      body: Buffer.from(attachment.base64, 'base64'),
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      body: form,
       cache: 'no-store',
       signal: AbortSignal.timeout(30_000),
     });
   } catch (err) {
-    throw new MailerError('E-ZOHO-ATTACHMENT', `Could not upload ${attachment.filename}: ${(err as Error)?.message ?? String(err)}`, 'Try again with a smaller attachment.');
+    throw new MailerError('E-ZOHO-ATTACHMENT', `Could not upload attachment(s): ${(err as Error)?.message ?? String(err)}`, 'Try again with smaller attachments.');
   }
   if (response.status === 401 && !retry) {
     accessToken = null;
     tokenExpiresAt = 0;
     await getAccessToken(true);
-    return uploadAttachmentWithRetry(attachment, true);
+    return uploadAttachmentsWithRetry(attachments, true);
   }
-  const payload = await response.json().catch(() => ({})) as ZohoEnvelope<ZohoAttachmentRef>;
-  if (!response.ok || !payload.data?.storeName || !payload.data.attachmentPath || !payload.data.attachmentName) {
+  const payload = await response.json().catch(() => ({})) as ZohoEnvelope<ZohoAttachmentRef | ZohoAttachmentRef[]>;
+  const uploaded = Array.isArray(payload.data) ? payload.data : payload.data ? [payload.data] : [];
+  const invalid = uploaded.some((ref) => !ref?.storeName || !ref.attachmentPath || !ref.attachmentName);
+  if (!response.ok || invalid || uploaded.length !== attachments.length) {
     const detail = payload.status?.description || payload.message || payload.error || `HTTP ${response.status}`;
-    throw new MailerError('E-ZOHO-ATTACHMENT', `Zoho rejected attachment ${attachment.filename}: ${detail}`, 'Check the attachment size and confirm the Zoho token has the ZohoMail.messages.CREATE scope.');
+    const names = attachments.map((attachment) => attachment.filename).join(', ');
+    throw new MailerError('E-ZOHO-ATTACHMENT', `Zoho rejected attachment(s) ${names}: ${detail}`, 'Check that the file type is supported, the attachment size is within your Zoho Mail plan limit, and the Zoho token has the ZohoMail.messages.CREATE scope.');
   }
-  return payload.data;
+  return uploaded;
 }
 
 export async function sendMail(args: {
@@ -349,7 +360,7 @@ export async function sendMail(args: {
   const totalSize = attachments.reduce((n, a) => n + Buffer.from(a.base64, 'base64').byteLength, 0);
   if (totalSize > MAX_ATTACHMENTS_BYTES) throw new MailerError('E-VALIDATION', 'Attachments are too large.', `Total attachment size must stay under ${Math.round(MAX_ATTACHMENTS_BYTES / 1024 / 1024)}MB.`);
 
-  const uploaded = await Promise.all(attachments.map(uploadAttachment));
+  const uploaded = await uploadAttachments(attachments);
   const payload = await zohoRequest<ZohoEnvelope<{ messageId?: string; mailId?: string }>>('/messages', {
     method: 'POST',
     body: JSON.stringify({
@@ -375,7 +386,7 @@ export async function sendReply(args: {
   const totalSize = attachments.reduce((n, a) => n + Buffer.from(a.base64, 'base64').byteLength, 0);
   if (totalSize > MAX_ATTACHMENTS_BYTES) throw new MailerError('E-VALIDATION', 'Attachments are too large.', `Total attachment size must stay under ${Math.round(MAX_ATTACHMENTS_BYTES / 1024 / 1024)}MB.`);
 
-  const uploaded = await Promise.all(attachments.map(uploadAttachment));
+  const uploaded = await uploadAttachments(attachments);
   const payload = await zohoRequest<ZohoEnvelope<{ messageId?: string; mailId?: string }>>(
     `/messages/${encodeURIComponent(args.messageId)}`,
     {
