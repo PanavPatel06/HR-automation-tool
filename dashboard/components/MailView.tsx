@@ -358,8 +358,6 @@ export function MailView({ applicants, templates, roles, categories: configCateg
   // this only saves the round trip.
   const canSendReply = Boolean(compose.subject.trim() && compose.html.trim() && !hasPlaceholder && sendEnabled && !sendingBroken);
   const canReply = Boolean(activeThreadId && replyTarget && !threadLoading);
-  const replyAttachmentUnsupported = composeMode === 'reply'
-    && (compose.attachments.length > 0 || Boolean(selectedTemplate?.attachment_url));
   // In reply mode the incoming email itself is the prompt, so instructions
   // and templates are optional. New emails still need a brief or template.
   const canWriteWithAI = composeMode === 'reply'
@@ -737,11 +735,6 @@ export function MailView({ applicants, templates, roles, categories: configCateg
                     Open a conversation containing a response from this candidate to enable replies.
                   </div>
                 ) : null}
-                {replyAttachmentUnsupported ? (
-                  <div className="banner warn" style={{ marginTop: 8 }}>
-                    <span>!</span><div>Zoho reply mode does not support attachments here. Remove the attachment or switch to New email.</div>
-                  </div>
-                ) : null}
               </fieldset>
 
               <label style={{ display: 'block', marginBottom: 12 }}>
@@ -832,7 +825,7 @@ export function MailView({ applicants, templates, roles, categories: configCateg
               <div className="toolbar" style={{ marginTop: 14 }}>
                 <button
                   className={willSendForReal ? 'danger' : 'primary'}
-                  disabled={!canSendReply || busy !== null || (composeMode === 'reply' && (!canReply || replyAttachmentUnsupported))} onClick={send}
+                  disabled={!canSendReply || busy !== null || (composeMode === 'reply' && !canReply)} onClick={send}
                   title={!sendEnabled ? 'Sending is switched off in Settings' : undefined}
                 >
                   {busy === 'send-reply' ? 'Sending…' : composeMode === 'reply' ? (willSendForReal ? 'Send reply for real' : 'Send reply') : (willSendForReal ? 'Send new email for real' : 'Send new email')}

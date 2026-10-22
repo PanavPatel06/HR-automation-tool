@@ -304,9 +304,6 @@ export async function POST(req: Request) {
         const template = templates.find((t) => t.template_id === templateId);
         if (template?.attachment_url) attachments.push(await fetchUrlAttachment(template.attachment_url, template.attachment_name));
       }
-      if (messageMode === 'reply' && attachments.length > 0) {
-        return fail(422, 'E-REPLY-ATTACHMENT', 'Zoho reply mode does not currently support attachments.', 'Remove the attachment or switch to New email.');
-      }
       const invalidAttachment = attachments.find((a) =>
         !a || typeof a.filename !== 'string' || !a.filename.trim()
         || typeof a.mimeType !== 'string' || typeof a.base64 !== 'string'
@@ -325,7 +322,7 @@ export async function POST(req: Request) {
       let providerMessageId = '';
       if (willSendForReal) {
         const sent = messageMode === 'reply'
-          ? await sendReply({ messageId: replyMessageId, to: applicant.email, subject, html })
+          ? await sendReply({ messageId: replyMessageId, to: applicant.email, subject, html, attachments })
           : await sendMail({ to: applicant.email, subject, html, attachments });
         providerMessageId = sent.id;
       }

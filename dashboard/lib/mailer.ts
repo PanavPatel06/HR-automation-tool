@@ -368,9 +368,14 @@ export async function sendMail(args: {
 }
 
 export async function sendReply(args: {
-  messageId: string; to: string; subject: string; html: string;
+  messageId: string; to: string; subject: string; html: string; attachments?: OutgoingAttachment[];
 }): Promise<{ id: string }> {
   if (!/^\d+$/.test(args.messageId)) throw new MailerError('E-ZOHO-THREAD', 'Invalid reply message ID.', 'Refresh the thread and try again.');
+  const attachments = args.attachments ?? [];
+  const totalSize = attachments.reduce((n, a) => n + Buffer.from(a.base64, 'base64').byteLength, 0);
+  if (totalSize > MAX_ATTACHMENTS_BYTES) throw new MailerError('E-VALIDATION', 'Attachments are too large.', `Total attachment size must stay under ${Math.round(MAX_ATTACHMENTS_BYTES / 1024 / 1024)}MB.`);
+
+  const uploaded = await Promise.all(attachments.map(uploadAttachment));
   const payload = await zohoRequest<ZohoEnvelope<{ messageId?: string; mailId?: string }>>(
     `/messages/${encodeURIComponent(args.messageId)}`,
     {
@@ -383,6 +388,7 @@ export async function sendReply(args: {
         mailFormat: 'html',
         encoding: 'UTF-8',
         action: 'reply',
+        ...(uploaded.length ? { attachments: uploaded } : {}),
       }),
     },
   );
