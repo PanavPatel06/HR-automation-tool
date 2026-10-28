@@ -2,11 +2,11 @@
 import { useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Row } from '../lib/contract';
-import { isTruthy, ACTIONABLE, STAGES } from '../lib/contract';
+import { isTruthy, STAGES } from '../lib/contract';
 import { StagePill, CategoryPill } from './Pills';
 import { shortDate, timeAgo } from '../lib/format';
 import { findDuplicates, duplicateIds } from '../lib/duplicates';
-import { useAction, ResultBanner } from './useAction';
+import { useAction, ResultBanner, type PreparedEmail } from './useAction';
 
 const PLACEHOLDER_RE = /\{\{\s*[a-zA-Z0-9_.]+\s*\}\}/;
 const MAX_ATTACHMENTS_BYTES = 15 * 1024 * 1024;
@@ -52,9 +52,9 @@ async function fileToBase64(file: File): Promise<string> {
  * guidance is optional. Their name, role and category come from the sheet.
  * A template can guide either mode.
  *
- * Two rules hold whichever way the message got written:
- *   - AI only ever fills the compose box; a human still has to press Send.
- *   - Sending is blocked while a literal {{field}} is still visible.
+ * AI drafts stay in the single-message composer or bulk review list until HR
+ * explicitly confirms sending. Sending is blocked while a literal {{field}}
+ * is still visible.
  *
  * Candidate membership stays in Applicants. Mail and conversation bodies are
  * fetched live from Zoho and are never written into the spreadsheet.
@@ -80,7 +80,12 @@ export function MailView({ applicants, templates, roles, categories: configCateg
   const [stage, setStage] = useState('');
   const [category, setCategory] = useState('');
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
-  const [confirmSend, setConfirmSend] = useState(false);
+  const [showBulkComposer, setShowBulkComposer] = useState(false);
+  const [bulkMode, setBulkMode] = useState<'reply' | 'template'>('reply');
+  const [bulkTemplateId, setBulkTemplateId] = useState('');
+  const [bulkInstructions, setBulkInstructions] = useState('');
+  const [bulkPrepared, setBulkPrepared] = useState<PreparedEmail[]>([]);
+  const [confirmBulkSend, setConfirmBulkSend] = useState(false);
   const [composeMode, setComposeMode] = useState<ComposeMode>('new');
   const [compose, setCompose] = useState<Compose>(EMPTY_COMPOSE);
   const [attachError, setAttachError] = useState<string | null>(null);
@@ -225,11 +230,10 @@ export function MailView({ applicants, templates, roles, categories: configCateg
   }, [selectedId]);
 
   const checkedRows = useMemo(() => applicants.filter((a) => checked.has(a.applicant_id)), [applicants, checked]);
-  const canDraft = checkedRows.length > 0 && checkedRows.every((r) => ACTIONABLE.draft.includes(r.stage as never));
-  const canApprove = checkedRows.length > 0 && checkedRows.every((r) => r.stage === 'DRAFTED');
-  const canSend = checkedRows.length > 0 && checkedRows.every((r) => r.stage === 'APPROVED');
 
   function toggleChecked(id: string) {
+    setBulkPrepared([]);
+    setConfirmBulkSend(false);
     setChecked((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
@@ -237,8 +241,41 @@ export function MailView({ applicants, templates, roles, categories: configCateg
     });
   }
 
+  async function prepareBulkMessages() {
+    if (!checkedRows.length) return;
+    const res = await run('bulk-message-prepare', {
+      ids: checkedRows.map((row) => row.applicant_id),
+      message_mode: bulkMode,
+      template_id: bulkTemplateId,
+      instructions: bulkInstructions,
+    });
+    setBulkPrepared(res.result?.items ?? []);
+    setConfirmBulkSend(false);
+  }
+
+  async function sendBulkMessages() {
+    if (!bulkPrepared.length) return;
+    const res = await run('bulk-message-send', {
+      template_id: bulkTemplateId,
+      items: bulkPrepared,
+    });
+    if (res.ok) {
+      setChecked(new Set());
+      setBulkPrepared([]);
+      setConfirmBulkSend(false);
+      setShowBulkComposer(false);
+    } else if (res.code === 'E-NETWORK') {
+      // The server may have completed the send before the network failed.
+      // Drop this batch so a second click cannot resend the same messages.
+      setBulkPrepared([]);
+      setConfirmBulkSend(false);
+    }
+  }
+
   function select(id: string) {
     setSelectedId(id);
+    setBulkPrepared([]);
+    setConfirmBulkSend(false);
     setComposeMode('new');
     setCompose(EMPTY_COMPOSE);
     setAttachError(null);
@@ -262,12 +299,6 @@ export function MailView({ applicants, templates, roles, categories: configCateg
   async function saveEmail() {
     if (!selected) return;
     await run('set-email', { applicant_id: selected.applicant_id, email: emailDraft.trim() });
-  }
-
-  async function bulkAct(action: string) {
-    const res = await run(action, { ids: [...checked] });
-    if (res.ok) setChecked(new Set());
-    setConfirmSend(false);
   }
 
   async function saveCategory() {
@@ -369,25 +400,23 @@ export function MailView({ applicants, templates, roles, categories: configCateg
       <ResultBanner result={result} onClose={clear} />
 
       <div className="toolbar">
-        <button className="primary" disabled={!canDraft || busy !== null} onClick={() => bulkAct('draft')}>
-          {busy === 'draft' ? 'Generating…' : `Generate drafts${checked.size ? ` (${checked.size})` : ''}`}
-        </button>
-        <button disabled={!canApprove || busy !== null} onClick={() => bulkAct('approve')}>
-          Approve{checked.size ? ` (${checked.size})` : ''}
-        </button>
-        <button disabled={checkedRows.length === 0 || !checkedRows.every((r) => r.stage === 'APPROVED') || busy !== null} onClick={() => bulkAct('unapprove')}>
-          Unapprove
-        </button>
         <button
-          className={dryRun ? '' : 'danger'}
-          disabled={!canSend || busy !== null || !sendEnabled || sendingBroken}
-          onClick={() => setConfirmSend(true)}
-          title={sendingBroken ? 'Dry run is off but email sending is not configured — sending is refused' : !sendEnabled ? 'Sending is switched off in Settings' : undefined}
+          className="primary"
+          disabled={!checkedRows.length || busy !== null}
+          onClick={() => {
+            setShowBulkComposer((open) => !open);
+            setBulkPrepared([]);
+            setConfirmBulkSend(false);
+          }}
         >
-          {dryRun ? 'Dry-run send' : 'Send'}{checked.size ? ` (${checked.size})` : ''}
+          {showBulkComposer ? 'Close bulk email' : `Bulk email${checkedRows.length ? ` (${checkedRows.length})` : ''}`}
         </button>
         <span className="spacer" />
-        {checked.size ? <button className="ghost sm" onClick={() => setChecked(new Set())}>Clear selection</button> : null}
+        {checked.size ? <button className="ghost sm" onClick={() => {
+          setChecked(new Set());
+          setBulkPrepared([]);
+          setConfirmBulkSend(false);
+        }}>Clear selection</button> : null}
         <span className="muted" style={{ fontSize: 12 }}>Sheet read {timeAgo(loadedAt)}</span>
         <button
           className="ghost sm" onClick={refreshFromSheet} disabled={refreshing}
@@ -434,24 +463,129 @@ export function MailView({ applicants, templates, roles, categories: configCateg
         {categorySuggestions.map((c) => <option key={c} value={c} />)}
       </datalist>
 
-      {confirmSend ? (
-        <div className="banner warn">
-          <span>!</span>
-          <div style={{ flex: 1 }}>
-            <strong>
-              {dryRun ? `Dry run: log ${checkedRows.length} email(s) without sending?` : `Really email ${checkedRows.length} candidate(s)? This cannot be undone.`}
-            </strong>
-            <div className="hint" style={{ marginTop: 6 }}>
-              {checkedRows.slice(0, 12).map((r) => r.email).join(', ')}{checkedRows.length > 12 ? ` … and ${checkedRows.length - 12} more` : ''}
+      {showBulkComposer ? (
+        <section className="panel" style={{ padding: 16, marginBottom: 14 }}>
+          <h3 style={{ margin: '0 0 6px' }}>Bulk email for selected candidates</h3>
+          <p className="muted" style={{ margin: '0 0 14px', fontSize: 13 }}>
+            Prepare a personalized message for each of the {checkedRows.length} selected candidate(s). Their pipeline stage does not block bulk email.
+          </p>
+
+          <fieldset style={{ border: 0, padding: 0, margin: '0 0 14px' }}>
+            <legend className="muted" style={{ marginBottom: 6, fontSize: 13 }}>Message type</legend>
+            <div className="toolbar" role="group" aria-label="Bulk email message type">
+              <button
+                type="button" className={bulkMode === 'reply' ? 'primary sm' : 'sm'}
+                aria-pressed={bulkMode === 'reply'} disabled={busy !== null}
+                onClick={() => { setBulkMode('reply'); setBulkPrepared([]); setConfirmBulkSend(false); }}
+              >Reply to latest response</button>
+              <button
+                type="button" className={bulkMode === 'template' ? 'primary sm' : 'sm'}
+                aria-pressed={bulkMode === 'template'} disabled={busy !== null}
+                onClick={() => { setBulkMode('template'); setBulkPrepared([]); setConfirmBulkSend(false); }}
+              >Send using a template</button>
             </div>
-            <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
-              <button className={dryRun ? 'primary' : 'danger'} onClick={() => bulkAct('send')} disabled={busy !== null}>
-                {busy === 'send' ? 'Sending…' : dryRun ? 'Run dry send' : `Yes, send ${checkedRows.length}`}
-              </button>
-              <button onClick={() => setConfirmSend(false)}>Cancel</button>
+          </fieldset>
+
+          <label style={{ display: 'block', marginBottom: 12 }}>
+            <div className="muted" style={{ marginBottom: 4 }}>
+              {bulkMode === 'reply' ? 'Template style (optional)' : 'Template'}
             </div>
+            <select
+              style={{ width: '100%' }} value={bulkTemplateId}
+              onChange={(event) => { setBulkTemplateId(event.target.value); setBulkPrepared([]); setConfirmBulkSend(false); }}
+            >
+              <option value="">{bulkMode === 'reply' ? 'No template — reply from each candidate’s message' : 'Choose a template'}</option>
+              {activeTemplates.map((template) => (
+                <option key={template.template_id} value={template.template_id}>
+                  {template.name}{template.job_role ? ` — ${template.job_role}` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {bulkMode === 'reply' ? (
+            <label style={{ display: 'block', marginBottom: 12 }}>
+              <div className="muted" style={{ marginBottom: 4 }}>Extra guidance for replies (optional)</div>
+              <textarea
+                rows={2} value={bulkInstructions}
+                onChange={(event) => { setBulkInstructions(event.target.value); setBulkPrepared([]); setConfirmBulkSend(false); }}
+                placeholder="e.g. Thank them for the reply and ask for their availability next week."
+              />
+            </label>
+          ) : null}
+
+          <div className="toolbar">
+            <button
+              className="primary" disabled={busy !== null || (bulkMode === 'template' && !bulkTemplateId)}
+              onClick={prepareBulkMessages}
+            >
+              {busy === 'bulk-message-prepare' ? 'Preparing messages…' : `Prepare ${checkedRows.length} message(s)`}
+            </button>
+            <span className="muted" style={{ fontSize: 12 }}>
+              {bulkMode === 'reply'
+                ? 'AI uses each candidate’s latest Zoho response. Review every draft before sending.'
+                : 'The selected template is filled with each candidate’s details. Review before sending.'}
+            </span>
           </div>
-        </div>
+
+          {bulkPrepared.length ? (
+            <div style={{ marginTop: 16 }}>
+              <h4 style={{ margin: '0 0 8px' }}>Review {bulkPrepared.length} prepared message(s)</h4>
+              <div style={{ display: 'grid', gap: 10 }}>
+                {bulkPrepared.map((item) => (
+                  <details key={item.applicant_id} className="panel" style={{ padding: 12 }}>
+                    <summary style={{ cursor: 'pointer' }}>
+                      <strong>{item.name || item.email}</strong> <span className="muted">({item.email}) — {item.subject}</span>
+                    </summary>
+                    <iframe
+                      title={`Message preview for ${item.name || item.email}`}
+                      sandbox="" srcDoc={item.html}
+                      style={{ width: '100%', minHeight: 240, marginTop: 10, background: '#fff', border: '1px solid var(--line)', borderRadius: 8 }}
+                    />
+                  </details>
+                ))}
+              </div>
+
+              <div className="toolbar" style={{ marginTop: 12 }}>
+                <button
+                  className={dryRun ? 'primary' : 'danger'}
+                  disabled={busy !== null || !sendEnabled || sendingBroken}
+                  title={sendingBroken ? 'Dry run is off but email sending is not configured' : !sendEnabled ? 'Sending is switched off in Settings' : undefined}
+                  onClick={() => setConfirmBulkSend(true)}
+                >
+                  {dryRun ? `Log ${bulkPrepared.length} dry-run message(s)` : `Send ${bulkPrepared.length} message(s)`}
+                </button>
+                <button className="ghost sm" disabled={busy !== null} onClick={() => { setBulkPrepared([]); setConfirmBulkSend(false); }}>
+                  Discard drafts
+                </button>
+                {!sendEnabled ? <span className="muted" style={{ fontSize: 12 }}>Turn on Sending in Settings to continue.</span> : null}
+                {sendingBroken ? <span className="muted" style={{ fontSize: 12 }}>Configure Zoho mail credentials for live sending.</span> : null}
+              </div>
+            </div>
+          ) : null}
+
+          {confirmBulkSend && bulkPrepared.length ? (
+            <div className="banner warn" style={{ marginTop: 12 }}>
+              <span>!</span>
+              <div style={{ flex: 1 }}>
+                <strong>
+                  {dryRun
+                    ? `Log ${bulkPrepared.length} message(s) as a dry run? They will not be delivered.`
+                    : `Send these ${bulkPrepared.length} personalized message(s) now?`}
+                </strong>
+                <div className="hint" style={{ marginTop: 6 }}>
+                  {bulkPrepared.map((item) => item.email).join(', ')}
+                </div>
+                <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+                  <button className={dryRun ? 'primary' : 'danger'} disabled={busy !== null} onClick={sendBulkMessages}>
+                    {busy === 'bulk-message-send' ? 'Sending…' : dryRun ? 'Confirm dry run' : 'Confirm and send'}
+                  </button>
+                  <button disabled={busy !== null} onClick={() => setConfirmBulkSend(false)}>Cancel</button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </section>
       ) : null}
 
       <div className="inbox-layout">
@@ -530,7 +664,7 @@ export function MailView({ applicants, templates, roles, categories: configCateg
                 {group.rows.map((a) => (
                   <div key={a.applicant_id} className={`inbox-item${a.applicant_id === selectedId ? ' active' : ''}`}>
                     <input
-                      type="checkbox" className="inbox-item-check" checked={checked.has(a.applicant_id)}
+                      type="checkbox" className="inbox-item-check" checked={checked.has(a.applicant_id)} disabled={busy !== null}
                       onChange={() => toggleChecked(a.applicant_id)} aria-label={`Select ${a.name}`}
                     />
                     <button type="button" className="inbox-item-body" onClick={() => select(a.applicant_id)}>

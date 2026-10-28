@@ -1,6 +1,15 @@
 'use client';
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+export type PreparedEmail = {
+  applicant_id: string;
+  name: string;
+  email: string;
+  message_mode: 'new' | 'reply';
+  reply_message_id: string;
+  subject: string;
+  html: string;
+};
 export type ActionResult = {
   ok: boolean;
   code?: string;
@@ -11,6 +20,7 @@ export type ActionResult = {
     notes?: string;
     items_ok?: number;
     items_failed?: number;
+    items?: PreparedEmail[];
     warnings?: string[];
     errors?: Array<{ applicant_id?: string; code?: string; message?: string }>;
     // The compose actions (reply-template-fill / reply-ai-draft) hand back a
